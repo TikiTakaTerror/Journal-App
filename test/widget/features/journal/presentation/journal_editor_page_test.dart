@@ -85,24 +85,219 @@ void main() {
 
     expect(button.onPressed, isNull);
   });
+
+  testWidgets('search and tag filters update recent entries list', (
+    tester,
+  ) async {
+    final fakeRepository = _FakeJournalRepository()
+      ..savedEntries.addAll([
+        _buildEntry(
+          id: 'entry-work',
+          title: 'Work Reflection',
+          content: 'Focused sprint and planning.',
+          tags: const ['work'],
+          hourOffset: 1,
+        ),
+        _buildEntry(
+          id: 'entry-calm',
+          title: 'Morning Calm',
+          content: 'Deep breathing helped a lot.',
+          tags: const ['wellness'],
+          hourOffset: 2,
+        ),
+      ]);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          journalRepositoryProvider.overrideWithValue(fakeRepository),
+        ],
+        child: const MaterialApp(home: JournalEditorPage()),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+    expect(find.byType(ListTile), findsAtLeastNWidgets(1));
+
+    await tester.enterText(
+      find.byKey(JournalEditorPage.searchFieldKey),
+      'calm',
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Work Reflection'), findsNothing);
+    expect(find.text('Morning Calm'), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(JournalEditorPage.searchFieldKey),
+      'work',
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Work Reflection'), findsOneWidget);
+    expect(find.text('Morning Calm'), findsNothing);
+
+    await tester.enterText(find.byKey(JournalEditorPage.searchFieldKey), '');
+    await tester.enterText(
+      find.byKey(JournalEditorPage.tagFilterFieldKey),
+      'work',
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Work Reflection'), findsOneWidget);
+    expect(find.text('Morning Calm'), findsNothing);
+  });
+
+  testWidgets('tap entry to edit and save updates existing entry', (
+    tester,
+  ) async {
+    final seed = _buildEntry(
+      id: 'entry-1',
+      title: 'Seed title',
+      content: 'Seed content',
+      tags: const ['growth'],
+      hourOffset: 1,
+    );
+    final fakeRepository = _FakeJournalRepository()..savedEntries.add(seed);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          journalRepositoryProvider.overrideWithValue(fakeRepository),
+        ],
+        child: const MaterialApp(home: JournalEditorPage()),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Seed title'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Update Entry'), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(JournalEditorPage.contentFieldKey),
+      'Updated content',
+    );
+    await tester.tap(find.byKey(JournalEditorPage.saveButtonKey));
+    await tester.pumpAndSettle();
+
+    expect(fakeRepository.savedEntries, hasLength(1));
+    expect(fakeRepository.savedEntries.single.id, 'entry-1');
+    expect(fakeRepository.savedEntries.single.content, 'Updated content');
+  });
+
+  testWidgets('delete removes the entry from repository and UI', (
+    tester,
+  ) async {
+    final fakeRepository = _FakeJournalRepository()
+      ..savedEntries.add(
+        _buildEntry(
+          id: 'entry-delete',
+          title: 'To Delete',
+          content: 'Delete me',
+          tags: const ['cleanup'],
+          hourOffset: 1,
+        ),
+      );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          journalRepositoryProvider.overrideWithValue(fakeRepository),
+        ],
+        child: const MaterialApp(home: JournalEditorPage()),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+    expect(find.text('To Delete'), findsOneWidget);
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('delete_entry_entry-delete')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(fakeRepository.savedEntries, isEmpty);
+    expect(find.text('Entry deleted'), findsOneWidget);
+    expect(find.text('No journal entries yet.'), findsOneWidget);
+  });
+}
+
+JournalEntry _buildEntry({
+  required String id,
+  required String title,
+  required String content,
+  required List<String> tags,
+  required int hourOffset,
+}) {
+  final now = DateTime.utc(2026, 2, 15, 9 + hourOffset);
+  return JournalEntry.create(
+    id: id,
+    title: title,
+    content: content,
+    tags: tags,
+    createdAt: now,
+    updatedAt: now,
+  );
 }
 
 class _FakeJournalRepository implements JournalRepository {
   final List<JournalEntry> savedEntries = <JournalEntry>[];
 
   @override
-  Future<void> deleteEntry(String id) async {}
+  Future<void> deleteEntry(String id) async {
+    savedEntries.removeWhere((entry) => entry.id == id);
+  }
 
   @override
-  Future<JournalEntry?> getEntryById(String id) async => null;
+  Future<JournalEntry?> getEntryById(String id) async {
+    for (final entry in savedEntries) {
+      if (entry.id == id) {
+        return entry;
+      }
+    }
+    return null;
+  }
 
   @override
   Future<List<JournalEntry>> listEntries({String? query, String? tag}) async {
-    return savedEntries;
+    final normalizedQuery = query?.trim().toLowerCase();
+    final normalizedTag = tag?.trim().toLowerCase();
+
+    final filtered =
+        savedEntries
+            .where((entry) {
+              final matchesQuery =
+                  normalizedQuery == null ||
+                  normalizedQuery.isEmpty ||
+                  entry.title.toLowerCase().contains(normalizedQuery) ||
+                  entry.content.toLowerCase().contains(normalizedQuery);
+
+              final matchesTag =
+                  normalizedTag == null ||
+                  normalizedTag.isEmpty ||
+                  entry.tags.contains(normalizedTag);
+
+              return matchesQuery && matchesTag;
+            })
+            .toList(growable: false)
+          ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+
+    return filtered;
   }
 
   @override
   Future<void> upsertEntry(JournalEntry entry) async {
-    savedEntries.add(entry);
+    final index = savedEntries.indexWhere(
+      (existing) => existing.id == entry.id,
+    );
+    if (index == -1) {
+      savedEntries.add(entry);
+      return;
+    }
+
+    savedEntries[index] = entry;
   }
 }

@@ -5,6 +5,8 @@ class JournalEditorState {
     this.tagsInput = '',
     this.isSaving = false,
     this.errorMessage,
+    this.editingEntryId,
+    this.editingCreatedAt,
   });
 
   final String title;
@@ -12,9 +14,12 @@ class JournalEditorState {
   final String tagsInput;
   final bool isSaving;
   final String? errorMessage;
+  final String? editingEntryId;
+  final DateTime? editingCreatedAt;
 
   bool get canSave =>
       title.trim().isNotEmpty && content.trim().isNotEmpty && !isSaving;
+  bool get isEditing => editingEntryId != null && editingCreatedAt != null;
 
   JournalEditorState copyWith({
     String? title,
@@ -23,6 +28,9 @@ class JournalEditorState {
     bool? isSaving,
     String? errorMessage,
     bool clearErrorMessage = false,
+    String? editingEntryId,
+    DateTime? editingCreatedAt,
+    bool clearEditing = false,
   }) {
     return JournalEditorState(
       title: title ?? this.title,
@@ -32,6 +40,12 @@ class JournalEditorState {
       errorMessage: clearErrorMessage
           ? null
           : (errorMessage ?? this.errorMessage),
+      editingEntryId: clearEditing
+          ? null
+          : (editingEntryId ?? this.editingEntryId),
+      editingCreatedAt: clearEditing
+          ? null
+          : (editingCreatedAt ?? this.editingCreatedAt),
     );
   }
 }

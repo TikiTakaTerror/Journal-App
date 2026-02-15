@@ -32,6 +32,21 @@ class JournalEditorController extends StateNotifier<JournalEditorState> {
     state = state.copyWith(tagsInput: value, clearErrorMessage: true);
   }
 
+  void loadForEditing(JournalEntry entry) {
+    state = state.copyWith(
+      title: entry.title,
+      content: entry.content,
+      tagsInput: entry.tags.join(', '),
+      editingEntryId: entry.id,
+      editingCreatedAt: entry.createdAt.toUtc(),
+      clearErrorMessage: true,
+    );
+  }
+
+  void clearEditor() {
+    state = const JournalEditorState();
+  }
+
   Future<bool> save() async {
     if (!state.canSave) {
       return false;
@@ -41,12 +56,13 @@ class JournalEditorController extends StateNotifier<JournalEditorState> {
 
     try {
       final now = _now().toUtc();
+      final isEditing = state.isEditing;
       final entry = JournalEntry.create(
-        id: _idGenerator(),
+        id: isEditing ? state.editingEntryId! : _idGenerator(),
         title: state.title,
         content: state.content,
         tags: _parseTags(state.tagsInput),
-        createdAt: now,
+        createdAt: isEditing ? state.editingCreatedAt! : now,
         updatedAt: now,
       );
       await _repository.upsertEntry(entry);

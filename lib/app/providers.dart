@@ -52,9 +52,14 @@ final journalRepositoryProvider = Provider<JournalRepository>((ref) {
   );
 });
 
+final journalSearchQueryProvider = StateProvider<String>((ref) => '');
+final journalTagFilterProvider = StateProvider<String>((ref) => '');
+
 final journalEntriesProvider = FutureProvider<List<JournalEntry>>((ref) async {
   final repository = ref.watch(journalRepositoryProvider);
-  return repository.listEntries();
+  final query = ref.watch(journalSearchQueryProvider);
+  final tag = ref.watch(journalTagFilterProvider);
+  return repository.listEntries(query: query, tag: tag);
 });
 
 final _uuid = Uuid();

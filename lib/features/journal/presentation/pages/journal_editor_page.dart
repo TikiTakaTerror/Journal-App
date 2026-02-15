@@ -10,6 +10,13 @@ class JournalEditorPage extends ConsumerStatefulWidget {
   static const Key contentFieldKey = ValueKey<String>('journal_content_field');
   static const Key tagsFieldKey = ValueKey<String>('journal_tags_field');
   static const Key saveButtonKey = ValueKey<String>('journal_save_button');
+  static const Key clearEditorButtonKey = ValueKey<String>(
+    'journal_clear_editor_button',
+  );
+  static const Key searchFieldKey = ValueKey<String>('journal_search_field');
+  static const Key tagFilterFieldKey = ValueKey<String>(
+    'journal_tag_filter_field',
+  );
   static const Key recentEntriesListKey = ValueKey<String>(
     'journal_recent_entries_list',
   );
@@ -22,12 +29,16 @@ class _JournalEditorPageState extends ConsumerState<JournalEditorPage> {
   final _titleController = TextEditingController();
   final _contentController = TextEditingController();
   final _tagsController = TextEditingController();
+  final _searchController = TextEditingController();
+  final _tagFilterController = TextEditingController();
 
   @override
   void dispose() {
     _titleController.dispose();
     _contentController.dispose();
     _tagsController.dispose();
+    _searchController.dispose();
+    _tagFilterController.dispose();
     super.dispose();
   }
 
@@ -86,26 +97,73 @@ class _JournalEditorPageState extends ConsumerState<JournalEditorPage> {
                     .updateTagsInput,
               ),
               const SizedBox(height: 16),
-              ElevatedButton(
-                key: JournalEditorPage.saveButtonKey,
-                onPressed: editorState.canSave ? _saveEntry : null,
-                child: editorState.isSaving
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Text('Save Entry'),
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton(
+                      key: JournalEditorPage.saveButtonKey,
+                      onPressed: editorState.canSave ? _saveEntry : null,
+                      child: editorState.isSaving
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Text(
+                              editorState.isEditing
+                                  ? 'Update Entry'
+                                  : 'Save Entry',
+                            ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  TextButton(
+                    key: JournalEditorPage.clearEditorButtonKey,
+                    onPressed: _clearEditor,
+                    child: const Text('Clear'),
+                  ),
+                ],
               ),
               const SizedBox(height: 16),
               const Divider(),
+              const SizedBox(height: 8),
+              TextField(
+                key: JournalEditorPage.searchFieldKey,
+                controller: _searchController,
+                decoration: const InputDecoration(
+                  labelText: 'Search',
+                  hintText: 'Search title or content',
+                  prefixIcon: Icon(Icons.search),
+                ),
+                onChanged: (value) {
+                  ref.read(journalSearchQueryProvider.notifier).state = value;
+                },
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                key: JournalEditorPage.tagFilterFieldKey,
+                controller: _tagFilterController,
+                decoration: const InputDecoration(
+                  labelText: 'Tag Filter',
+                  hintText: 'Filter by tag',
+                  prefixIcon: Icon(Icons.tag),
+                ),
+                onChanged: (value) {
+                  ref.read(journalTagFilterProvider.notifier).state = value;
+                },
+              ),
               const SizedBox(height: 8),
               Text(
                 'Recent Entries',
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(height: 8),
-              const Expanded(child: _RecentEntriesList()),
+              Expanded(
+                child: _RecentEntriesList(
+                  onSelect: _loadEntryForEditing,
+                  onDelete: _deleteEntry,
+                ),
+              ),
             ],
           ),
         ),
@@ -114,6 +172,7 @@ class _JournalEditorPageState extends ConsumerState<JournalEditorPage> {
   }
 
   Future<void> _saveEntry() async {
+    final wasEditing = ref.read(journalEditorControllerProvider).isEditing;
     final saved = await ref
         .read(journalEditorControllerProvider.notifier)
         .save();
@@ -126,9 +185,9 @@ class _JournalEditorPageState extends ConsumerState<JournalEditorPage> {
       _contentController.clear();
       _tagsController.clear();
       ref.invalidate(journalEntriesProvider);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Entry saved')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(wasEditing ? 'Entry updated' : 'Entry saved')),
+      );
       return;
     }
 
@@ -139,10 +198,43 @@ class _JournalEditorPageState extends ConsumerState<JournalEditorPage> {
       ).showSnackBar(SnackBar(content: Text(message)));
     }
   }
+
+  void _clearEditor() {
+    ref.read(journalEditorControllerProvider.notifier).clearEditor();
+    _titleController.clear();
+    _contentController.clear();
+    _tagsController.clear();
+  }
+
+  void _loadEntryForEditing(JournalEntry entry) {
+    ref.read(journalEditorControllerProvider.notifier).loadForEditing(entry);
+    _titleController.text = entry.title;
+    _contentController.text = entry.content;
+    _tagsController.text = entry.tags.join(', ');
+  }
+
+  Future<void> _deleteEntry(JournalEntry entry) async {
+    await ref.read(journalRepositoryProvider).deleteEntry(entry.id);
+    if (!mounted) {
+      return;
+    }
+
+    if (ref.read(journalEditorControllerProvider).editingEntryId == entry.id) {
+      _clearEditor();
+    }
+
+    ref.invalidate(journalEntriesProvider);
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Entry deleted')));
+  }
 }
 
 class _RecentEntriesList extends ConsumerWidget {
-  const _RecentEntriesList();
+  const _RecentEntriesList({required this.onSelect, required this.onDelete});
+
+  final ValueChanged<JournalEntry> onSelect;
+  final ValueChanged<JournalEntry> onDelete;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -163,7 +255,11 @@ class _RecentEntriesList extends ConsumerWidget {
           separatorBuilder: (_, _) => const Divider(height: 1),
           itemBuilder: (context, index) {
             final entry = entries[index];
-            return _JournalEntryListTile(entry: entry);
+            return _JournalEntryListTile(
+              entry: entry,
+              onTap: () => onSelect(entry),
+              onDelete: () => onDelete(entry),
+            );
           },
         );
       },
@@ -172,22 +268,40 @@ class _RecentEntriesList extends ConsumerWidget {
 }
 
 class _JournalEntryListTile extends StatelessWidget {
-  const _JournalEntryListTile({required this.entry});
+  const _JournalEntryListTile({
+    required this.entry,
+    required this.onTap,
+    required this.onDelete,
+  });
 
   final JournalEntry entry;
+  final VoidCallback onTap;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
     return ListTile(
+      onTap: onTap,
       title: Text(entry.title, maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: Text(
         entry.content,
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
       ),
-      trailing: Text(
-        _formatDate(entry.updatedAt),
-        style: Theme.of(context).textTheme.bodySmall,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            _formatDate(entry.updatedAt),
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          IconButton(
+            key: ValueKey<String>('delete_entry_${entry.id}'),
+            tooltip: 'Delete entry',
+            onPressed: onDelete,
+            icon: const Icon(Icons.delete_outline),
+          ),
+        ],
       ),
     );
   }
