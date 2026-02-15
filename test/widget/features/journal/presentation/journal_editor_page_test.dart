@@ -28,6 +28,27 @@ void main() {
     expect(find.text('No journal entries yet.'), findsOneWidget);
   });
 
+  testWidgets('theme toggle switches icon mode', (tester) async {
+    final fakeRepository = _FakeJournalRepository();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          journalRepositoryProvider.overrideWithValue(fakeRepository),
+        ],
+        child: const JournalApp(),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.dark_mode), findsOneWidget);
+
+    await tester.tap(find.byKey(JournalEditorPage.themeToggleButtonKey));
+    await tester.pumpAndSettle();
+
+    expect(find.byIcon(Icons.light_mode), findsOneWidget);
+  });
+
   testWidgets('journal editor saves an entry through repository', (
     tester,
   ) async {
@@ -148,7 +169,7 @@ void main() {
     expect(find.text('Morning Calm'), findsNothing);
   });
 
-  testWidgets('tap entry to edit and save updates existing entry', (
+  testWidgets('tap entry shows details and enables edit update flow', (
     tester,
   ) async {
     final seed = _buildEntry(
@@ -171,10 +192,19 @@ void main() {
 
     await tester.pumpAndSettle();
 
+    await tester.drag(
+      find.byKey(JournalEditorPage.mobileLayoutScrollKey),
+      const Offset(0, -260),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Seed title'), findsOneWidget);
     await tester.tap(find.text('Seed title'));
     await tester.pumpAndSettle();
 
     expect(find.text('Update Entry'), findsOneWidget);
+    expect(find.text('Entry Details'), findsOneWidget);
+    expect(find.text('Seed content'), findsWidgets);
 
     await tester.enterText(
       find.byKey(JournalEditorPage.contentFieldKey),
@@ -186,9 +216,10 @@ void main() {
     expect(fakeRepository.savedEntries, hasLength(1));
     expect(fakeRepository.savedEntries.single.id, 'entry-1');
     expect(fakeRepository.savedEntries.single.content, 'Updated content');
+    expect(find.text('Entry updated'), findsOneWidget);
   });
 
-  testWidgets('delete removes the entry from repository and UI', (
+  testWidgets('delete asks confirmation and supports undo restore', (
     tester,
   ) async {
     final fakeRepository = _FakeJournalRepository()
@@ -214,14 +245,34 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('To Delete'), findsOneWidget);
 
+    await tester.drag(
+      find.byKey(JournalEditorPage.mobileLayoutScrollKey),
+      const Offset(0, -260),
+    );
+    await tester.pumpAndSettle();
     await tester.tap(
       find.byKey(const ValueKey<String>('delete_entry_entry-delete')),
     );
     await tester.pumpAndSettle();
 
+    expect(find.text('Delete this entry?'), findsOneWidget);
+    expect(find.text('Cancel'), findsOneWidget);
+    expect(find.text('Delete'), findsOneWidget);
+
+    await tester.tap(find.text('Delete'));
+    await tester.pumpAndSettle();
+
     expect(fakeRepository.savedEntries, isEmpty);
     expect(find.text('Entry deleted'), findsOneWidget);
-    expect(find.text('No journal entries yet.'), findsOneWidget);
+    expect(find.text('UNDO'), findsOneWidget);
+
+    await tester.tap(find.text('UNDO'));
+    await tester.pumpAndSettle();
+
+    expect(fakeRepository.savedEntries, hasLength(1));
+    expect(fakeRepository.savedEntries.single.title, 'To Delete');
+    expect(find.text('Entry restored'), findsOneWidget);
+    expect(find.text('To Delete'), findsWidgets);
   });
 }
 
