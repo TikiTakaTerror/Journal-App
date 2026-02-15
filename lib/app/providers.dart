@@ -8,6 +8,7 @@ import 'package:ai_journal/features/journal/data/local/journal_local_storage_ser
 import 'package:ai_journal/features/journal/data/local/sqflite_encrypted_database_factory.dart';
 import 'package:ai_journal/features/journal/data/local/sqlite_journal_local_storage_service.dart';
 import 'package:ai_journal/features/journal/data/repositories/journal_repository_impl.dart';
+import 'package:ai_journal/features/journal/domain/models/journal_entry.dart';
 import 'package:ai_journal/features/journal/domain/repositories/journal_repository.dart';
 import 'package:ai_journal/features/journal/presentation/state/journal_editor_controller.dart';
 import 'package:ai_journal/features/journal/presentation/state/journal_editor_state.dart';
@@ -49,6 +50,11 @@ final journalRepositoryProvider = Provider<JournalRepository>((ref) {
   return JournalRepositoryImpl(
     storageService: ref.watch(journalLocalStorageServiceProvider),
   );
+});
+
+final journalEntriesProvider = FutureProvider<List<JournalEntry>>((ref) async {
+  final repository = ref.watch(journalRepositoryProvider);
+  return repository.listEntries();
 });
 
 final _uuid = Uuid();

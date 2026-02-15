@@ -1,4 +1,5 @@
 import 'package:ai_journal/app/providers.dart';
+import 'package:ai_journal/features/journal/domain/models/journal_entry.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -9,6 +10,9 @@ class JournalEditorPage extends ConsumerStatefulWidget {
   static const Key contentFieldKey = ValueKey<String>('journal_content_field');
   static const Key tagsFieldKey = ValueKey<String>('journal_tags_field');
   static const Key saveButtonKey = ValueKey<String>('journal_save_button');
+  static const Key recentEntriesListKey = ValueKey<String>(
+    'journal_recent_entries_list',
+  );
 
   @override
   ConsumerState<JournalEditorPage> createState() => _JournalEditorPageState();
@@ -53,6 +57,7 @@ class _JournalEditorPageState extends ConsumerState<JournalEditorPage> {
               ),
               const SizedBox(height: 12),
               Expanded(
+                flex: 2,
                 child: TextField(
                   key: JournalEditorPage.contentFieldKey,
                   controller: _contentController,
@@ -92,6 +97,15 @@ class _JournalEditorPageState extends ConsumerState<JournalEditorPage> {
                       )
                     : const Text('Save Entry'),
               ),
+              const SizedBox(height: 16),
+              const Divider(),
+              const SizedBox(height: 8),
+              Text(
+                'Recent Entries',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 8),
+              const Expanded(child: _RecentEntriesList()),
             ],
           ),
         ),
@@ -111,6 +125,7 @@ class _JournalEditorPageState extends ConsumerState<JournalEditorPage> {
       _titleController.clear();
       _contentController.clear();
       _tagsController.clear();
+      ref.invalidate(journalEntriesProvider);
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Entry saved')));
@@ -123,5 +138,64 @@ class _JournalEditorPageState extends ConsumerState<JournalEditorPage> {
         context,
       ).showSnackBar(SnackBar(content: Text(message)));
     }
+  }
+}
+
+class _RecentEntriesList extends ConsumerWidget {
+  const _RecentEntriesList();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final entriesAsyncValue = ref.watch(journalEntriesProvider);
+
+    return entriesAsyncValue.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (_, _) =>
+          const Center(child: Text('Unable to load entries right now.')),
+      data: (entries) {
+        if (entries.isEmpty) {
+          return const Center(child: Text('No journal entries yet.'));
+        }
+
+        return ListView.separated(
+          key: JournalEditorPage.recentEntriesListKey,
+          itemCount: entries.length,
+          separatorBuilder: (_, _) => const Divider(height: 1),
+          itemBuilder: (context, index) {
+            final entry = entries[index];
+            return _JournalEntryListTile(entry: entry);
+          },
+        );
+      },
+    );
+  }
+}
+
+class _JournalEntryListTile extends StatelessWidget {
+  const _JournalEntryListTile({required this.entry});
+
+  final JournalEntry entry;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      title: Text(entry.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Text(
+        entry.content,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+      ),
+      trailing: Text(
+        _formatDate(entry.updatedAt),
+        style: Theme.of(context).textTheme.bodySmall,
+      ),
+    );
+  }
+
+  String _formatDate(DateTime value) {
+    final local = value.toLocal();
+    final month = local.month.toString().padLeft(2, '0');
+    final day = local.day.toString().padLeft(2, '0');
+    return '${local.year}-$month-$day';
   }
 }

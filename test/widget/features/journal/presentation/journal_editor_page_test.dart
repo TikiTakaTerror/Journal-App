@@ -8,6 +8,26 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('shows empty state when there are no saved entries', (
+    tester,
+  ) async {
+    final fakeRepository = _FakeJournalRepository();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          journalRepositoryProvider.overrideWithValue(fakeRepository),
+        ],
+        child: const MaterialApp(home: JournalEditorPage()),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    expect(find.text('Recent Entries'), findsOneWidget);
+    expect(find.text('No journal entries yet.'), findsOneWidget);
+  });
+
   testWidgets('journal editor saves an entry through repository', (
     tester,
   ) async {
@@ -41,6 +61,8 @@ void main() {
     expect(fakeRepository.savedEntries, hasLength(1));
     expect(fakeRepository.savedEntries.single.title, 'A better day');
     expect(find.text('Entry saved'), findsOneWidget);
+    expect(find.text('Recent Entries'), findsOneWidget);
+    expect(find.text('A better day'), findsOneWidget);
   });
 
   testWidgets('save button is disabled when required fields are empty', (
