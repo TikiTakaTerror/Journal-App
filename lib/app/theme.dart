@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 class AppTheme {
   const AppTheme._();
@@ -41,23 +40,30 @@ class AppTheme {
       colorScheme: scheme,
     );
 
-    final sansText = GoogleFonts.manropeTextTheme(base.textTheme);
-    final display = GoogleFonts.sourceSerif4(
-      textStyle: sansText.headlineMedium?.copyWith(
+    final textTheme = base.textTheme.copyWith(
+      headlineLarge: base.textTheme.headlineLarge?.copyWith(
         fontWeight: FontWeight.w700,
         letterSpacing: -0.3,
       ),
-    );
-
-    final textTheme = sansText.copyWith(
-      headlineLarge: display,
-      headlineMedium: display,
-      headlineSmall: display.copyWith(fontSize: 26),
-      titleLarge: sansText.titleLarge?.copyWith(fontWeight: FontWeight.w700),
-      titleMedium: sansText.titleMedium?.copyWith(fontWeight: FontWeight.w600),
-      labelLarge: sansText.labelLarge?.copyWith(fontWeight: FontWeight.w600),
-      bodyLarge: sansText.bodyLarge?.copyWith(height: 1.45),
-      bodyMedium: sansText.bodyMedium?.copyWith(height: 1.4),
+      headlineMedium: base.textTheme.headlineMedium?.copyWith(
+        fontWeight: FontWeight.w700,
+        letterSpacing: -0.3,
+      ),
+      headlineSmall: base.textTheme.headlineSmall?.copyWith(
+        fontWeight: FontWeight.w700,
+        letterSpacing: -0.3,
+      ),
+      titleLarge: base.textTheme.titleLarge?.copyWith(
+        fontWeight: FontWeight.w700,
+      ),
+      titleMedium: base.textTheme.titleMedium?.copyWith(
+        fontWeight: FontWeight.w600,
+      ),
+      labelLarge: base.textTheme.labelLarge?.copyWith(
+        fontWeight: FontWeight.w600,
+      ),
+      bodyLarge: base.textTheme.bodyLarge?.copyWith(height: 1.45),
+      bodyMedium: base.textTheme.bodyMedium?.copyWith(height: 1.4),
     );
 
     final inputBorder = OutlineInputBorder(

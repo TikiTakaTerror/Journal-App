@@ -5,6 +5,7 @@ class JournalEditorState {
     this.tagsInput = '',
     this.isSaving = false,
     this.errorMessage,
+    this.aiReflection,
     this.editingEntryId,
     this.editingCreatedAt,
   });
@@ -14,6 +15,7 @@ class JournalEditorState {
   final String tagsInput;
   final bool isSaving;
   final String? errorMessage;
+  final String? aiReflection;
   final String? editingEntryId;
   final DateTime? editingCreatedAt;
 
@@ -28,6 +30,8 @@ class JournalEditorState {
     bool? isSaving,
     String? errorMessage,
     bool clearErrorMessage = false,
+    String? aiReflection,
+    bool clearAiReflection = false,
     String? editingEntryId,
     DateTime? editingCreatedAt,
     bool clearEditing = false,
@@ -40,6 +44,9 @@ class JournalEditorState {
       errorMessage: clearErrorMessage
           ? null
           : (errorMessage ?? this.errorMessage),
+      aiReflection: clearAiReflection
+          ? null
+          : (aiReflection ?? this.aiReflection),
       editingEntryId: clearEditing
           ? null
           : (editingEntryId ?? this.editingEntryId),

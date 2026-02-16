@@ -19,6 +19,9 @@ class SettingsPage extends ConsumerStatefulWidget {
   static const Key darkModeSwitchKey = ValueKey<String>(
     'settings_dark_mode_switch',
   );
+  static const Key openAiKeyStatusKey = ValueKey<String>(
+    'settings_openai_key_status',
+  );
   static const Key exportButtonKey = ValueKey<String>('settings_export_button');
   static const Key wipeDataButtonKey = ValueKey<String>(
     'settings_wipe_data_button',
@@ -35,6 +38,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     final settings = ref.watch(appSettingsControllerProvider);
+    final openAiConfig = ref.watch(openAIConfigProvider);
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -83,6 +87,24 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                     : (value) {
                         _onCloudAiToggle(value);
                       },
+              ),
+              const Divider(height: 8),
+              ListTile(
+                key: SettingsPage.openAiKeyStatusKey,
+                contentPadding: EdgeInsets.zero,
+                title: Text(
+                  openAiConfig.hasApiKey
+                      ? 'OpenAI key: Detected'
+                      : 'OpenAI key: Missing',
+                ),
+                subtitle: const Text(
+                  'Loaded from --dart-define / --dart-define-from-file.',
+                ),
+                trailing: Icon(
+                  openAiConfig.hasApiKey
+                      ? Icons.verified_outlined
+                      : Icons.warning_amber_outlined,
+                ),
               ),
             ],
           ),

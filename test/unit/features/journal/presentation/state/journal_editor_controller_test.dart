@@ -1,3 +1,6 @@
+import 'package:ai_journal/features/ai/domain/contracts/ai_orchestrator.dart';
+import 'package:ai_journal/features/ai/domain/models/ai_requests.dart';
+import 'package:ai_journal/features/ai/domain/models/ai_responses.dart';
 import 'package:ai_journal/features/journal/domain/models/journal_entry.dart';
 import 'package:ai_journal/features/journal/domain/repositories/journal_repository.dart';
 import 'package:ai_journal/features/journal/presentation/state/journal_editor_controller.dart';
@@ -26,6 +29,54 @@ void main() {
       expect(repository.savedEntries.single.tags, const ['work', 'focus']);
       expect(controller.state.title, isEmpty);
       expect(controller.state.isEditing, isFalse);
+    });
+
+    test('save generates reflection when AI orchestrator is available', () async {
+      final repository = _FakeJournalRepository();
+      final orchestrator = _FakeAIOrchestrator(
+        reflection:
+            'You handled a difficult moment with a concrete self-regulation action.',
+      );
+      final controller = JournalEditorController(
+        repository: repository,
+        idGenerator: () => 'generated-id',
+        now: () => DateTime.utc(2026, 2, 16, 12),
+        aiOrchestrator: orchestrator,
+      );
+
+      controller
+        ..updateTitle('New title')
+        ..updateContent('New content')
+        ..updateTagsInput('work,focus');
+
+      final saved = await controller.save();
+
+      expect(saved, isTrue);
+      expect(controller.state.aiReflection, orchestrator.reflection);
+      expect(orchestrator.reflectionRequests, hasLength(1));
+      expect(orchestrator.reflectionRequests.single.entry.id, 'generated-id');
+      expect(orchestrator.reflectionRequests.single.entry.title, 'New title');
+    });
+
+    test('save succeeds when reflection generation fails', () async {
+      final repository = _FakeJournalRepository();
+      final controller = JournalEditorController(
+        repository: repository,
+        idGenerator: () => 'generated-id',
+        now: () => DateTime.utc(2026, 2, 16, 12),
+        aiOrchestrator: _FailingAIOrchestrator(),
+      );
+
+      controller
+        ..updateTitle('New title')
+        ..updateContent('New content');
+
+      final saved = await controller.save();
+
+      expect(saved, isTrue);
+      expect(repository.savedEntries, hasLength(1));
+      expect(controller.state.aiReflection, isNull);
+      expect(controller.state.errorMessage, isNull);
     });
 
     test(
@@ -127,5 +178,45 @@ class _FakeJournalRepository implements JournalRepository {
     }
 
     savedEntries[index] = entry;
+  }
+}
+
+class _FakeAIOrchestrator implements AIOrchestrator {
+  _FakeAIOrchestrator({required this.reflection});
+
+  final String reflection;
+  final List<AIReflectionRequest> reflectionRequests = <AIReflectionRequest>[];
+
+  @override
+  Future<AIChatResponse> chatWithMemory(AIChatRequest request) async {
+    return AIChatResponse(message: 'chat');
+  }
+
+  @override
+  Future<String> generatePrompt(AISmartPromptRequest request) async {
+    return 'prompt';
+  }
+
+  @override
+  Future<String> reflectOnEntry(AIReflectionRequest request) async {
+    reflectionRequests.add(request);
+    return reflection;
+  }
+}
+
+class _FailingAIOrchestrator implements AIOrchestrator {
+  @override
+  Future<AIChatResponse> chatWithMemory(AIChatRequest request) async {
+    throw Exception('not used');
+  }
+
+  @override
+  Future<String> generatePrompt(AISmartPromptRequest request) async {
+    throw Exception('not used');
+  }
+
+  @override
+  Future<String> reflectOnEntry(AIReflectionRequest request) async {
+    throw Exception('reflection failed');
   }
 }

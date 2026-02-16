@@ -1,5 +1,12 @@
 import 'dart:async';
 
+import 'package:ai_journal/features/ai/application/default_ai_orchestrator.dart';
+import 'package:ai_journal/features/ai/domain/contracts/ai_orchestrator.dart';
+import 'package:ai_journal/features/ai/domain/models/ai_privacy_policy.dart';
+import 'package:ai_journal/features/ai/infrastructure/openai/openai_cloud_ai_service.dart';
+import 'package:ai_journal/features/ai/infrastructure/openai/openai_config.dart';
+import 'package:ai_journal/features/ai/presentation/state/smart_prompt_controller.dart';
+import 'package:ai_journal/features/ai/presentation/state/smart_prompt_state.dart';
 import 'package:ai_journal/core/platform/platform_support.dart';
 import 'package:ai_journal/core/security/flutter_secure_storage_key_provider.dart';
 import 'package:ai_journal/features/journal/data/local/encrypted_database_factory.dart';
@@ -64,7 +71,9 @@ final journalRepositoryProvider = Provider<JournalRepository>((ref) {
   );
 });
 
-final appSettingsLocalServiceProvider = Provider<AppSettingsLocalService>((ref) {
+final appSettingsLocalServiceProvider = Provider<AppSettingsLocalService>((
+  ref,
+) {
   return AppSettingsLocalService(store: ref.watch(keyValueStoreProvider));
 });
 
@@ -80,6 +89,39 @@ final appThemeModeProvider = Provider<ThemeMode>((ref) {
   return settings.darkMode ? ThemeMode.dark : ThemeMode.light;
 });
 
+final openAIConfigProvider = Provider<OpenAIConfig>((ref) {
+  return OpenAIConfig.fromEnvironment();
+});
+
+final aiPrivacyPolicyProvider = Provider<AIPrivacyPolicy>((ref) {
+  final settings = ref.watch(appSettingsControllerProvider);
+  return AIPrivacyPolicy(
+    localOnlyAi: settings.localOnlyAi,
+    cloudAiConsent: settings.cloudAiConsent,
+  );
+});
+
+final aiOrchestratorProvider = Provider<AIOrchestrator?>((ref) {
+  final config = ref.watch(openAIConfigProvider);
+  final policy = ref.watch(aiPrivacyPolicyProvider);
+
+  if (!policy.canUseCloud || !config.hasApiKey) {
+    return null;
+  }
+
+  final service = OpenAICloudAIService(config: config, privacyPolicy: policy);
+  ref.onDispose(service.dispose);
+  return DefaultAIOrchestrator(aiService: service);
+});
+
+final smartPromptControllerProvider =
+    StateNotifierProvider<SmartPromptController, SmartPromptState>((ref) {
+      return SmartPromptController(
+        repository: ref.watch(journalRepositoryProvider),
+        aiOrchestrator: ref.watch(aiOrchestratorProvider),
+      );
+    });
+
 final journalSearchQueryProvider = StateProvider<String>((ref) => '');
 final journalTagFilterProvider = StateProvider<String>((ref) => '');
 
@@ -90,7 +132,9 @@ final journalEntriesProvider = FutureProvider<List<JournalEntry>>((ref) async {
   return repository.listEntries(query: query, tag: tag);
 });
 
-final journalAllEntriesProvider = FutureProvider<List<JournalEntry>>((ref) async {
+final journalAllEntriesProvider = FutureProvider<List<JournalEntry>>((
+  ref,
+) async {
   final repository = ref.watch(journalRepositoryProvider);
   return repository.listEntries();
 });
@@ -111,5 +155,6 @@ final journalEditorControllerProvider =
         repository: ref.watch(journalRepositoryProvider),
         idGenerator: _uuid.v4,
         now: DateTime.now,
+        aiOrchestrator: ref.watch(aiOrchestratorProvider),
       );
     });

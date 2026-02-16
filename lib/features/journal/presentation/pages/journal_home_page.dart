@@ -12,6 +12,10 @@ class JournalHomePage extends ConsumerStatefulWidget {
   static const Key searchFieldKey = ValueKey<String>('home_search_field');
   static const Key tagFieldKey = ValueKey<String>('home_tag_field');
   static const Key entriesListKey = ValueKey<String>('home_entries_list');
+  static const Key generatePromptButtonKey = ValueKey<String>(
+    'home_generate_prompt_button',
+  );
+  static const Key promptTextKey = ValueKey<String>('home_prompt_text');
 
   @override
   ConsumerState<JournalHomePage> createState() => _JournalHomePageState();
@@ -31,62 +35,91 @@ class _JournalHomePageState extends ConsumerState<JournalHomePage> {
   @override
   Widget build(BuildContext context) {
     final entriesAsync = ref.watch(journalEntriesProvider);
+    final promptState = ref.watch(smartPromptControllerProvider);
     final isCompact = MediaQuery.sizeOf(context).width < 820;
 
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _HeaderCard(onQuickTag: _applyQuickTag),
-          const SizedBox(height: 16),
-          _FilterPanel(
-            isCompact: isCompact,
-            searchController: _searchController,
-            tagController: _tagController,
-            onSearchChanged: (value) {
-              ref.read(journalSearchQueryProvider.notifier).state = value;
-            },
-            onTagChanged: (value) {
-              ref.read(journalTagFilterProvider.notifier).state = value;
-            },
-            onReset: _resetFilters,
-          ),
-          const SizedBox(height: 16),
-          Expanded(
-            child: entriesAsync.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (_, _) => const _ErrorState(),
-              data: (entries) {
-                if (entries.isEmpty) {
-                  return const _EmptyState();
-                }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxTopSectionHeight = isCompact
+            ? constraints.maxHeight * 0.58
+            : constraints.maxHeight * 0.5;
 
-                return Column(
-                  children: [
-                    _EntriesSummary(entriesCount: entries.length),
-                    const SizedBox(height: 10),
-                    Expanded(
-                      child: ListView.separated(
-                        key: JournalHomePage.entriesListKey,
-                        itemCount: entries.length,
-                        separatorBuilder: (_, _) => const SizedBox(height: 8),
-                        itemBuilder: (context, index) {
-                          final entry = entries[index];
-                          return _EntryCard(
-                            entry: entry,
-                            onTap: () => _openEntryDetail(entry),
-                          );
-                        },
+        return Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: maxTopSectionHeight),
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _HeaderCard(
+                        onQuickTag: _applyQuickTag,
+                        promptText: promptState.prompt,
+                        promptError: promptState.errorMessage,
+                        promptLoading: promptState.isLoading,
+                        onGeneratePrompt: _generateSmartPrompt,
                       ),
-                    ),
-                  ],
-                );
-              },
-            ),
+                      const SizedBox(height: 16),
+                      _FilterPanel(
+                        isCompact: isCompact,
+                        searchController: _searchController,
+                        tagController: _tagController,
+                        onSearchChanged: (value) {
+                          ref.read(journalSearchQueryProvider.notifier).state =
+                              value;
+                        },
+                        onTagChanged: (value) {
+                          ref.read(journalTagFilterProvider.notifier).state =
+                              value;
+                        },
+                        onReset: _resetFilters,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Expanded(
+                child: entriesAsync.when(
+                  loading: () =>
+                      const Center(child: CircularProgressIndicator()),
+                  error: (_, _) => const _ErrorState(),
+                  data: (entries) {
+                    if (entries.isEmpty) {
+                      return const _EmptyState();
+                    }
+
+                    return Column(
+                      children: [
+                        _EntriesSummary(entriesCount: entries.length),
+                        const SizedBox(height: 10),
+                        Expanded(
+                          child: ListView.separated(
+                            key: JournalHomePage.entriesListKey,
+                            itemCount: entries.length,
+                            separatorBuilder: (_, _) =>
+                                const SizedBox(height: 8),
+                            itemBuilder: (context, index) {
+                              final entry = entries[index];
+                              return _EntryCard(
+                                entry: entry,
+                                onTap: () => _openEntryDetail(entry),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -147,6 +180,10 @@ class _JournalHomePageState extends ConsumerState<JournalHomePage> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(const SnackBar(content: Text('Entry restored')));
+  }
+
+  Future<void> _generateSmartPrompt() async {
+    await ref.read(smartPromptControllerProvider.notifier).generatePrompt();
   }
 }
 
@@ -239,9 +276,19 @@ class _EntriesSummary extends StatelessWidget {
 }
 
 class _HeaderCard extends StatelessWidget {
-  const _HeaderCard({required this.onQuickTag});
+  const _HeaderCard({
+    required this.onQuickTag,
+    required this.promptText,
+    required this.promptError,
+    required this.promptLoading,
+    required this.onGeneratePrompt,
+  });
 
   final ValueChanged<String> onQuickTag;
+  final String? promptText;
+  final String? promptError;
+  final bool promptLoading;
+  final Future<void> Function() onGeneratePrompt;
 
   @override
   Widget build(BuildContext context) {
@@ -278,6 +325,91 @@ class _HeaderCard extends StatelessWidget {
               _QuickTagChip(label: 'gratitude', onTap: onQuickTag),
             ],
           ),
+          const SizedBox(height: 12),
+          _SmartPromptPanel(
+            promptText: promptText,
+            promptError: promptError,
+            promptLoading: promptLoading,
+            onGeneratePrompt: onGeneratePrompt,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SmartPromptPanel extends StatelessWidget {
+  const _SmartPromptPanel({
+    required this.promptText,
+    required this.promptError,
+    required this.promptLoading,
+    required this.onGeneratePrompt,
+  });
+
+  final String? promptText;
+  final String? promptError;
+  final bool promptLoading;
+  final Future<void> Function() onGeneratePrompt;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasPrompt = promptText != null && promptText!.trim().isNotEmpty;
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: colorScheme.surface.withValues(alpha: 0.55),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.auto_awesome_outlined, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Smart Journaling Prompt',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+              ),
+              FilledButton.tonalIcon(
+                key: JournalHomePage.generatePromptButtonKey,
+                onPressed: promptLoading
+                    ? null
+                    : () {
+                        unawaited(onGeneratePrompt());
+                      },
+                icon: promptLoading
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.bolt),
+                label: const Text('Generate'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            key: JournalHomePage.promptTextKey,
+            hasPrompt
+                ? promptText!
+                : 'Generate a focused prompt based on recent themes in your journal.',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          if (promptError != null && promptError!.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              promptError!,
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colorScheme.error),
+            ),
+          ],
         ],
       ),
     );

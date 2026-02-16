@@ -17,6 +17,12 @@ class JournalEditorPage extends ConsumerStatefulWidget {
   static const Key headingButtonKey = ValueKey<String>('format_heading_button');
   static const Key bulletButtonKey = ValueKey<String>('format_bullet_button');
   static const Key quoteButtonKey = ValueKey<String>('format_quote_button');
+  static const Key reflectionDialogKey = ValueKey<String>(
+    'journal_reflection_dialog',
+  );
+  static const Key reflectionContinueButtonKey = ValueKey<String>(
+    'journal_reflection_continue_button',
+  );
 
   @override
   ConsumerState<JournalEditorPage> createState() => _JournalEditorPageState();
@@ -242,6 +248,31 @@ class _JournalEditorPageState extends ConsumerState<JournalEditorPage> {
     }
 
     if (saved) {
+      final reflection = ref.read(journalEditorControllerProvider).aiReflection;
+      if (reflection != null && reflection.isNotEmpty) {
+        await showDialog<void>(
+          context: context,
+          builder: (_) {
+            return AlertDialog(
+              key: JournalEditorPage.reflectionDialogKey,
+              title: const Text('AI Reflection'),
+              content: SingleChildScrollView(child: Text(reflection)),
+              actions: [
+                FilledButton(
+                  key: JournalEditorPage.reflectionContinueButtonKey,
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Continue'),
+                ),
+              ],
+            );
+          },
+        );
+      }
+
+      if (!mounted) {
+        return;
+      }
+
       Navigator.of(context).pop(true);
       return;
     }

@@ -1,5 +1,8 @@
 import 'package:ai_journal/app/app.dart';
 import 'package:ai_journal/app/providers.dart';
+import 'package:ai_journal/features/ai/domain/contracts/ai_orchestrator.dart';
+import 'package:ai_journal/features/ai/domain/models/ai_requests.dart';
+import 'package:ai_journal/features/ai/domain/models/ai_responses.dart';
 import 'package:ai_journal/features/journal/data/local/key_value_store.dart';
 import 'package:ai_journal/features/journal/domain/models/journal_entry.dart';
 import 'package:ai_journal/features/journal/domain/repositories/journal_repository.dart';
@@ -70,6 +73,94 @@ void main() {
 
     expect(find.text('Entry saved'), findsOneWidget);
     expect(find.text('A better day'), findsOneWidget);
+  });
+
+  testWidgets('shows AI reflection dialog after save when available', (
+    tester,
+  ) async {
+    final fakeRepository = _FakeJournalRepository();
+    final fakeOrchestrator = _FakeAIOrchestrator(
+      reflection:
+          'You noticed what helped and repeated a healthy coping pattern.',
+    );
+
+    await _pumpJournalApp(
+      tester,
+      repository: fakeRepository,
+      aiOrchestrator: fakeOrchestrator,
+    );
+
+    await tester.tap(find.byKey(MainShellPage.createEntryFabKey));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byKey(JournalEditorPage.titleFieldKey), 'Day');
+    await tester.enterText(
+      find.byKey(JournalEditorPage.contentFieldKey),
+      'I felt tense, then breathing helped.',
+    );
+    await tester.enterText(
+      find.byKey(JournalEditorPage.tagsFieldKey),
+      'wellness',
+    );
+    await tester.pump();
+
+    final saveButton = tester.widget<FilledButton>(
+      find.byKey(JournalEditorPage.saveButtonKey),
+    );
+    expect(saveButton.onPressed, isNotNull);
+
+    await tester.tap(find.byKey(JournalEditorPage.saveButtonKey));
+    await tester.pumpAndSettle();
+
+    expect(fakeOrchestrator.reflectionRequests, hasLength(1));
+    expect(find.text('AI Reflection'), findsOneWidget);
+    expect(
+      find.text(
+        'You noticed what helped and repeated a healthy coping pattern.',
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Entry saved'), findsOneWidget);
+    expect(find.text('Day'), findsOneWidget);
+  });
+
+  testWidgets('generates smart prompt on journal home', (tester) async {
+    final fakeRepository = _FakeJournalRepository()
+      ..savedEntries.add(
+        _buildEntry(
+          id: 'entry-1',
+          title: 'Seed title',
+          content: 'Seed content',
+          tags: const <String>['growth', 'focus'],
+          hourOffset: 1,
+        ),
+      );
+    final fakeOrchestrator = _FakeAIOrchestrator(
+      reflection: 'unused',
+      generatedPrompt: 'What is one small win you can build on tomorrow?',
+    );
+
+    await _pumpJournalApp(
+      tester,
+      repository: fakeRepository,
+      aiOrchestrator: fakeOrchestrator,
+    );
+
+    expect(find.byKey(JournalHomePage.generatePromptButtonKey), findsOneWidget);
+
+    await tester.tap(find.byKey(JournalHomePage.generatePromptButtonKey));
+    await tester.pumpAndSettle();
+
+    expect(fakeOrchestrator.promptRequests, hasLength(1));
+    expect(find.byKey(JournalHomePage.promptTextKey), findsOneWidget);
+    expect(
+      find.text('What is one small win you can build on tomorrow?'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('search and tag filters narrow home list', (tester) async {
@@ -161,6 +252,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Privacy & Security'), findsOneWidget);
+    expect(find.byKey(SettingsPage.openAiKeyStatusKey), findsOneWidget);
+    expect(find.text('OpenAI key: Missing'), findsOneWidget);
 
     final localOnlyTile = tester.widget<SwitchListTile>(
       find.byKey(SettingsPage.localOnlyAiSwitchKey),
@@ -187,15 +280,18 @@ void main() {
 Future<void> _pumpJournalApp(
   WidgetTester tester, {
   required _FakeJournalRepository repository,
+  AIOrchestrator? aiOrchestrator,
 }) async {
+  final overrides = [
+    journalRepositoryProvider.overrideWithValue(repository),
+    keyValueStoreProvider.overrideWithValue(_InMemoryKeyValueStore()),
+  ];
+  if (aiOrchestrator != null) {
+    overrides.add(aiOrchestratorProvider.overrideWithValue(aiOrchestrator));
+  }
+
   await tester.pumpWidget(
-    ProviderScope(
-      overrides: [
-        journalRepositoryProvider.overrideWithValue(repository),
-        keyValueStoreProvider.overrideWithValue(_InMemoryKeyValueStore()),
-      ],
-      child: const JournalApp(),
-    ),
+    ProviderScope(overrides: overrides, child: const JournalApp()),
   );
 
   await tester.pumpAndSettle();
@@ -292,5 +388,34 @@ class _InMemoryKeyValueStore implements KeyValueStore {
   @override
   Future<void> writeString(String key, String value) async {
     _values[key] = value;
+  }
+}
+
+class _FakeAIOrchestrator implements AIOrchestrator {
+  _FakeAIOrchestrator({
+    required this.reflection,
+    this.generatedPrompt = 'prompt',
+  });
+
+  final String reflection;
+  final String generatedPrompt;
+  final List<AIReflectionRequest> reflectionRequests = <AIReflectionRequest>[];
+  final List<AISmartPromptRequest> promptRequests = <AISmartPromptRequest>[];
+
+  @override
+  Future<AIChatResponse> chatWithMemory(AIChatRequest request) async {
+    return AIChatResponse(message: 'chat');
+  }
+
+  @override
+  Future<String> generatePrompt(AISmartPromptRequest request) async {
+    promptRequests.add(request);
+    return generatedPrompt;
+  }
+
+  @override
+  Future<String> reflectOnEntry(AIReflectionRequest request) async {
+    reflectionRequests.add(request);
+    return reflection;
   }
 }
