@@ -1,67 +1,49 @@
 import 'package:ai_journal/app/app.dart';
 import 'package:ai_journal/app/providers.dart';
+import 'package:ai_journal/features/journal/data/local/key_value_store.dart';
 import 'package:ai_journal/features/journal/domain/models/journal_entry.dart';
 import 'package:ai_journal/features/journal/domain/repositories/journal_repository.dart';
+import 'package:ai_journal/features/journal/presentation/pages/journal_detail_page.dart';
 import 'package:ai_journal/features/journal/presentation/pages/journal_editor_page.dart';
+import 'package:ai_journal/features/journal/presentation/pages/journal_home_page.dart';
+import 'package:ai_journal/features/settings/presentation/pages/settings_page.dart';
+import 'package:ai_journal/features/shell/presentation/pages/main_shell_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('shows empty state when there are no saved entries', (
-    tester,
-  ) async {
+  testWidgets('shows journal home empty state on launch', (tester) async {
     final fakeRepository = _FakeJournalRepository();
 
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          journalRepositoryProvider.overrideWithValue(fakeRepository),
-        ],
-        child: const MaterialApp(home: JournalEditorPage()),
-      ),
-    );
+    await _pumpJournalApp(tester, repository: fakeRepository);
 
-    await tester.pumpAndSettle();
-
-    expect(find.text('Recent Entries'), findsOneWidget);
+    expect(find.text('Journal'), findsAtLeastNWidgets(1));
+    expect(find.text('Capture today while it is fresh'), findsOneWidget);
     expect(find.text('No journal entries yet.'), findsOneWidget);
+    expect(find.byKey(MainShellPage.createEntryFabKey), findsOneWidget);
   });
 
-  testWidgets('theme toggle switches icon mode', (tester) async {
-    final fakeRepository = _FakeJournalRepository();
+  testWidgets('theme toggle updates icon', (tester) async {
+    await _pumpJournalApp(tester, repository: _FakeJournalRepository());
 
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          journalRepositoryProvider.overrideWithValue(fakeRepository),
-        ],
-        child: const JournalApp(),
-      ),
-    );
-
-    await tester.pumpAndSettle();
     expect(find.byIcon(Icons.dark_mode), findsOneWidget);
 
-    await tester.tap(find.byKey(JournalEditorPage.themeToggleButtonKey));
+    await tester.tap(find.byKey(MainShellPage.themeToggleButtonKey));
     await tester.pumpAndSettle();
 
     expect(find.byIcon(Icons.light_mode), findsOneWidget);
   });
 
-  testWidgets('journal editor saves an entry through repository', (
-    tester,
-  ) async {
+  testWidgets('create entry flow saves and renders card', (tester) async {
     final fakeRepository = _FakeJournalRepository();
 
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          journalRepositoryProvider.overrideWithValue(fakeRepository),
-        ],
-        child: const JournalApp(),
-      ),
-    );
+    await _pumpJournalApp(tester, repository: fakeRepository);
+
+    await tester.tap(find.byKey(MainShellPage.createEntryFabKey));
+    await tester.pumpAndSettle();
+
+    expect(find.text('New Entry'), findsOneWidget);
 
     await tester.enterText(
       find.byKey(JournalEditorPage.titleFieldKey),
@@ -73,7 +55,7 @@ void main() {
     );
     await tester.enterText(
       find.byKey(JournalEditorPage.tagsFieldKey),
-      'wellness, routine',
+      'wellness, Morning Routine',
     );
 
     await tester.tap(find.byKey(JournalEditorPage.saveButtonKey));
@@ -81,199 +63,142 @@ void main() {
 
     expect(fakeRepository.savedEntries, hasLength(1));
     expect(fakeRepository.savedEntries.single.title, 'A better day');
+    expect(fakeRepository.savedEntries.single.tags, const <String>[
+      'wellness',
+      'morning-routine',
+    ]);
+
     expect(find.text('Entry saved'), findsOneWidget);
-    expect(find.text('Recent Entries'), findsOneWidget);
     expect(find.text('A better day'), findsOneWidget);
   });
 
-  testWidgets('save button is disabled when required fields are empty', (
-    tester,
-  ) async {
-    final fakeRepository = _FakeJournalRepository();
-
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          journalRepositoryProvider.overrideWithValue(fakeRepository),
-        ],
-        child: const MaterialApp(home: JournalEditorPage()),
-      ),
-    );
-
-    final button = tester.widget<ElevatedButton>(
-      find.byKey(JournalEditorPage.saveButtonKey),
-    );
-
-    expect(button.onPressed, isNull);
-  });
-
-  testWidgets('search and tag filters update recent entries list', (
-    tester,
-  ) async {
+  testWidgets('search and tag filters narrow home list', (tester) async {
     final fakeRepository = _FakeJournalRepository()
       ..savedEntries.addAll([
         _buildEntry(
           id: 'entry-work',
           title: 'Work Reflection',
           content: 'Focused sprint and planning.',
-          tags: const ['work'],
+          tags: const <String>['work'],
           hourOffset: 1,
         ),
         _buildEntry(
           id: 'entry-calm',
           title: 'Morning Calm',
           content: 'Deep breathing helped a lot.',
-          tags: const ['wellness'],
+          tags: const <String>['wellness'],
           hourOffset: 2,
         ),
       ]);
 
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          journalRepositoryProvider.overrideWithValue(fakeRepository),
-        ],
-        child: const MaterialApp(home: JournalEditorPage()),
-      ),
-    );
+    await _pumpJournalApp(tester, repository: fakeRepository);
 
-    await tester.pumpAndSettle();
-    expect(find.byType(ListTile), findsAtLeastNWidgets(1));
-
-    await tester.enterText(
-      find.byKey(JournalEditorPage.searchFieldKey),
-      'calm',
-    );
+    await tester.enterText(find.byKey(JournalHomePage.searchFieldKey), 'calm');
     await tester.pumpAndSettle();
 
     expect(find.text('Work Reflection'), findsNothing);
     expect(find.text('Morning Calm'), findsOneWidget);
 
-    await tester.enterText(
-      find.byKey(JournalEditorPage.searchFieldKey),
-      'work',
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.text('Work Reflection'), findsOneWidget);
-    expect(find.text('Morning Calm'), findsNothing);
-
-    await tester.enterText(find.byKey(JournalEditorPage.searchFieldKey), '');
-    await tester.enterText(
-      find.byKey(JournalEditorPage.tagFilterFieldKey),
-      'work',
-    );
+    await tester.enterText(find.byKey(JournalHomePage.searchFieldKey), '');
+    await tester.enterText(find.byKey(JournalHomePage.tagFieldKey), 'work');
     await tester.pumpAndSettle();
 
     expect(find.text('Work Reflection'), findsOneWidget);
     expect(find.text('Morning Calm'), findsNothing);
   });
 
-  testWidgets('tap entry shows details and enables edit update flow', (
-    tester,
-  ) async {
-    final seed = _buildEntry(
-      id: 'entry-1',
-      title: 'Seed title',
-      content: 'Seed content',
-      tags: const ['growth'],
-      hourOffset: 1,
-    );
-    final fakeRepository = _FakeJournalRepository()..savedEntries.add(seed);
-
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          journalRepositoryProvider.overrideWithValue(fakeRepository),
-        ],
-        child: const MaterialApp(home: JournalEditorPage()),
-      ),
-    );
-
-    await tester.pumpAndSettle();
-
-    await tester.drag(
-      find.byKey(JournalEditorPage.mobileLayoutScrollKey),
-      const Offset(0, -260),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.text('Seed title'), findsOneWidget);
-    await tester.tap(find.text('Seed title'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Update Entry'), findsOneWidget);
-    expect(find.text('Entry Details'), findsOneWidget);
-    expect(find.text('Seed content'), findsWidgets);
-
-    await tester.enterText(
-      find.byKey(JournalEditorPage.contentFieldKey),
-      'Updated content',
-    );
-    await tester.tap(find.byKey(JournalEditorPage.saveButtonKey));
-    await tester.pumpAndSettle();
-
-    expect(fakeRepository.savedEntries, hasLength(1));
-    expect(fakeRepository.savedEntries.single.id, 'entry-1');
-    expect(fakeRepository.savedEntries.single.content, 'Updated content');
-    expect(find.text('Entry updated'), findsOneWidget);
-  });
-
-  testWidgets('delete asks confirmation and supports undo restore', (
+  testWidgets('detail edit delete flow updates and deletes entry', (
     tester,
   ) async {
     final fakeRepository = _FakeJournalRepository()
       ..savedEntries.add(
         _buildEntry(
-          id: 'entry-delete',
-          title: 'To Delete',
-          content: 'Delete me',
-          tags: const ['cleanup'],
+          id: 'entry-1',
+          title: 'Seed title',
+          content: 'Seed content',
+          tags: const <String>['growth'],
           hourOffset: 1,
         ),
       );
 
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          journalRepositoryProvider.overrideWithValue(fakeRepository),
-        ],
-        child: const MaterialApp(home: JournalEditorPage()),
-      ),
-    );
+    await _pumpJournalApp(tester, repository: fakeRepository);
 
-    await tester.pumpAndSettle();
-    expect(find.text('To Delete'), findsOneWidget);
-
-    await tester.drag(
-      find.byKey(JournalEditorPage.mobileLayoutScrollKey),
-      const Offset(0, -260),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(
-      find.byKey(const ValueKey<String>('delete_entry_entry-delete')),
-    );
+    await tester.tap(find.text('Seed title'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Delete this entry?'), findsOneWidget);
-    expect(find.text('Cancel'), findsOneWidget);
-    expect(find.text('Delete'), findsOneWidget);
+    expect(find.text('Entry Details'), findsOneWidget);
+    expect(find.text('Seed content'), findsOneWidget);
+
+    await tester.tap(find.byKey(JournalDetailPage.editButtonKey));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(JournalEditorPage.contentFieldKey),
+      'Updated content',
+    );
+
+    await tester.tap(find.byKey(JournalEditorPage.saveButtonKey));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Updated content'), findsOneWidget);
+    expect(fakeRepository.savedEntries.single.content, 'Updated content');
+
+    await tester.tap(find.byKey(JournalDetailPage.deleteButtonKey));
+    await tester.pumpAndSettle();
 
     await tester.tap(find.text('Delete'));
     await tester.pumpAndSettle();
 
     expect(fakeRepository.savedEntries, isEmpty);
-    expect(find.text('Entry deleted'), findsOneWidget);
-    expect(find.text('UNDO'), findsOneWidget);
+    expect(find.text('Entry Details'), findsNothing);
+    expect(find.text('No journal entries yet.'), findsOneWidget);
+  });
 
-    await tester.tap(find.text('UNDO'));
+  testWidgets('settings tab exposes privacy toggles', (tester) async {
+    await _pumpJournalApp(tester, repository: _FakeJournalRepository());
+
+    await tester.tap(find.text('Settings').last);
     await tester.pumpAndSettle();
 
-    expect(fakeRepository.savedEntries, hasLength(1));
-    expect(fakeRepository.savedEntries.single.title, 'To Delete');
-    expect(find.text('Entry restored'), findsOneWidget);
-    expect(find.text('To Delete'), findsWidgets);
+    expect(find.text('Privacy & Security'), findsOneWidget);
+
+    final localOnlyTile = tester.widget<SwitchListTile>(
+      find.byKey(SettingsPage.localOnlyAiSwitchKey),
+    );
+    expect(localOnlyTile.value, isTrue);
+
+    await tester.tap(find.byKey(SettingsPage.localOnlyAiSwitchKey));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(SettingsPage.cloudAiSwitchKey));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Enable cloud AI processing?'), findsOneWidget);
+    await tester.tap(find.text('Enable'));
+    await tester.pumpAndSettle();
+
+    final cloudTile = tester.widget<SwitchListTile>(
+      find.byKey(SettingsPage.cloudAiSwitchKey),
+    );
+    expect(cloudTile.value, isTrue);
   });
+}
+
+Future<void> _pumpJournalApp(
+  WidgetTester tester, {
+  required _FakeJournalRepository repository,
+}) async {
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [
+        journalRepositoryProvider.overrideWithValue(repository),
+        keyValueStoreProvider.overrideWithValue(_InMemoryKeyValueStore()),
+      ],
+      child: const JournalApp(),
+    ),
+  );
+
+  await tester.pumpAndSettle();
 }
 
 JournalEntry _buildEntry({
@@ -350,5 +275,22 @@ class _FakeJournalRepository implements JournalRepository {
     }
 
     savedEntries[index] = entry;
+  }
+}
+
+class _InMemoryKeyValueStore implements KeyValueStore {
+  final Map<String, String> _values = <String, String>{};
+
+  @override
+  Future<String?> readString(String key) async => _values[key];
+
+  @override
+  Future<void> remove(String key) async {
+    _values.remove(key);
+  }
+
+  @override
+  Future<void> writeString(String key, String value) async {
+    _values[key] = value;
   }
 }

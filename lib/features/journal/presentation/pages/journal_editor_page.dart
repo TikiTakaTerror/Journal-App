@@ -1,37 +1,22 @@
-import 'dart:async';
-
 import 'package:ai_journal/app/providers.dart';
 import 'package:ai_journal/features/journal/domain/models/journal_entry.dart';
-import 'package:ai_journal/features/journal/presentation/state/journal_editor_state.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 class JournalEditorPage extends ConsumerStatefulWidget {
-  const JournalEditorPage({super.key});
+  const JournalEditorPage({super.key, this.initialEntry});
+
+  final JournalEntry? initialEntry;
 
   static const Key titleFieldKey = ValueKey<String>('journal_title_field');
   static const Key contentFieldKey = ValueKey<String>('journal_content_field');
   static const Key tagsFieldKey = ValueKey<String>('journal_tags_field');
   static const Key saveButtonKey = ValueKey<String>('journal_save_button');
-  static const Key clearEditorButtonKey = ValueKey<String>(
-    'journal_clear_editor_button',
-  );
-  static const Key themeToggleButtonKey = ValueKey<String>(
-    'journal_theme_toggle_button',
-  );
-  static const Key searchFieldKey = ValueKey<String>('journal_search_field');
-  static const Key tagFilterFieldKey = ValueKey<String>(
-    'journal_tag_filter_field',
-  );
-  static const Key clearFiltersButtonKey = ValueKey<String>(
-    'journal_clear_filters_button',
-  );
-  static const Key recentEntriesListKey = ValueKey<String>(
-    'journal_recent_entries_list',
-  );
-  static const Key mobileLayoutScrollKey = ValueKey<String>(
-    'journal_mobile_layout_scroll',
-  );
+  static const Key boldButtonKey = ValueKey<String>('format_bold_button');
+  static const Key italicButtonKey = ValueKey<String>('format_italic_button');
+  static const Key headingButtonKey = ValueKey<String>('format_heading_button');
+  static const Key bulletButtonKey = ValueKey<String>('format_bullet_button');
+  static const Key quoteButtonKey = ValueKey<String>('format_quote_button');
 
   @override
   ConsumerState<JournalEditorPage> createState() => _JournalEditorPageState();
@@ -41,115 +26,214 @@ class _JournalEditorPageState extends ConsumerState<JournalEditorPage> {
   final _titleController = TextEditingController();
   final _contentController = TextEditingController();
   final _tagsController = TextEditingController();
-  final _searchController = TextEditingController();
-  final _tagFilterController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    final entry = widget.initialEntry;
+    if (entry != null) {
+      _titleController.text = entry.title;
+      _contentController.text = entry.content;
+      _tagsController.text = entry.tags.join(', ');
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+
+      final notifier = ref.read(journalEditorControllerProvider.notifier);
+      if (entry == null) {
+        notifier.clearEditor();
+        return;
+      }
+
+      notifier.loadForEditing(entry);
+    });
+  }
 
   @override
   void dispose() {
     _titleController.dispose();
     _contentController.dispose();
     _tagsController.dispose();
-    _searchController.dispose();
-    _tagFilterController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final editorState = ref.watch(journalEditorControllerProvider);
-    final themeMode = ref.watch(themeModeProvider);
-
-    final editorPane = _EditorPane(
-      titleController: _titleController,
-      contentController: _contentController,
-      tagsController: _tagsController,
-      editorState: editorState,
-      onSave: _saveEntry,
-      onClear: _clearEditor,
-      onTitleChanged: ref
-          .read(journalEditorControllerProvider.notifier)
-          .updateTitle,
-      onContentChanged: ref
-          .read(journalEditorControllerProvider.notifier)
-          .updateContent,
-      onTagsChanged: ref
-          .read(journalEditorControllerProvider.notifier)
-          .updateTagsInput,
-    );
-
-    final entriesPane = _EntriesPane(
-      searchController: _searchController,
-      tagFilterController: _tagFilterController,
-      onSearchChanged: (value) {
-        ref.read(journalSearchQueryProvider.notifier).state = value;
-      },
-      onTagFilterChanged: (value) {
-        ref.read(journalTagFilterProvider.notifier).state = value;
-      },
-      onClearFilters: _clearFilters,
-      onSelectEntry: _loadEntryForEditing,
-      onDeleteEntry: _confirmAndDeleteEntry,
-    );
+    final words = _countWords(editorState.content);
+    final characters = editorState.content.trim().length;
+    final isCompact = MediaQuery.sizeOf(context).width < 900;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('AI Journal'),
+        title: Text(editorState.isEditing ? 'Edit Entry' : 'New Entry'),
         actions: [
-          IconButton(
-            key: JournalEditorPage.themeToggleButtonKey,
-            tooltip: 'Toggle theme',
-            onPressed: () => _toggleTheme(themeMode),
-            icon: Icon(
-              themeMode == ThemeMode.dark ? Icons.light_mode : Icons.dark_mode,
-            ),
+          TextButton(
+            onPressed: () => Navigator.of(context).maybePop(),
+            child: const Text('Close'),
           ),
         ],
       ),
       body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            if (constraints.maxWidth >= 1000) {
-              return Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    Expanded(flex: 6, child: editorPane),
-                    const SizedBox(width: 16),
-                    Expanded(flex: 5, child: entriesPane),
-                  ],
-                ),
-              );
-            }
-
-            final paneHeight = constraints.maxHeight < 900 ? 340.0 : 420.0;
-            return Padding(
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 960),
+            child: Padding(
               padding: const EdgeInsets.all(16),
-              child: ListView(
-                key: JournalEditorPage.mobileLayoutScrollKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  SizedBox(height: paneHeight, child: editorPane),
+                  if (editorState.isSaving) const LinearProgressIndicator(),
+                  _EditorGuideCard(
+                    isEditing: editorState.isEditing,
+                    words: words,
+                    characters: characters,
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    key: JournalEditorPage.titleFieldKey,
+                    controller: _titleController,
+                    textInputAction: TextInputAction.next,
+                    decoration: const InputDecoration(
+                      labelText: 'Title',
+                      hintText: 'Name this entry',
+                    ),
+                    onChanged: ref
+                        .read(journalEditorControllerProvider.notifier)
+                        .updateTitle,
+                  ),
+                  const SizedBox(height: 12),
+                  _FormattingToolbar(
+                    compact: isCompact,
+                    onBold: () => _wrapSelection('**', '**'),
+                    onItalic: () => _wrapSelection('_', '_'),
+                    onHeading: () => _insertAtSelection('\n## '),
+                    onBullet: () => _insertAtSelection('\n- '),
+                    onQuote: () => _insertAtSelection('\n> '),
+                  ),
+                  const SizedBox(height: 10),
+                  Expanded(
+                    child: TextField(
+                      key: JournalEditorPage.contentFieldKey,
+                      controller: _contentController,
+                      maxLines: null,
+                      expands: true,
+                      textAlignVertical: TextAlignVertical.top,
+                      decoration: const InputDecoration(
+                        alignLabelWithHint: true,
+                        labelText: 'Write',
+                        hintText: 'Capture your thoughts with clarity...',
+                      ),
+                      onChanged: ref
+                          .read(journalEditorControllerProvider.notifier)
+                          .updateContent,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    key: JournalEditorPage.tagsFieldKey,
+                    controller: _tagsController,
+                    decoration: const InputDecoration(
+                      labelText: 'Tags',
+                      hintText: 'wellness, work, gratitude',
+                    ),
+                    onChanged: ref
+                        .read(journalEditorControllerProvider.notifier)
+                        .updateTagsInput,
+                  ),
                   const SizedBox(height: 16),
-                  SizedBox(height: paneHeight, child: entriesPane),
+                  FilledButton.icon(
+                    key: JournalEditorPage.saveButtonKey,
+                    onPressed: editorState.canSave ? _save : null,
+                    icon: const Icon(Icons.save_outlined),
+                    label: Text(
+                      editorState.isEditing ? 'Update Entry' : 'Save Entry',
+                    ),
+                  ),
                 ],
               ),
-            );
-          },
+            ),
+          ),
         ),
       ),
     );
   }
 
-  void _toggleTheme(ThemeMode currentMode) {
-    ref.read(themeModeProvider.notifier).state = currentMode == ThemeMode.dark
-        ? ThemeMode.light
-        : ThemeMode.dark;
+  void _wrapSelection(String prefix, String suffix) {
+    final value = _contentController.value;
+    final text = value.text;
+    final selection = value.selection;
+
+    if (!selection.isValid || selection.start < 0 || selection.end < 0) {
+      _contentController.text += '$prefix$suffix';
+      _contentController.selection = TextSelection.collapsed(
+        offset: _contentController.text.length - suffix.length,
+      );
+      _notifyContentChanged();
+      return;
+    }
+
+    final start = selection.start;
+    final end = selection.end;
+    final selected = text.substring(start, end);
+    final replaced = '$prefix$selected$suffix';
+    final updated = text.replaceRange(start, end, replaced);
+
+    _contentController.value = TextEditingValue(
+      text: updated,
+      selection: TextSelection.collapsed(offset: start + replaced.length),
+    );
+    _notifyContentChanged();
   }
 
-  Future<void> _saveEntry() async {
-    final currentState = ref.read(journalEditorControllerProvider);
-    final wasEditing = currentState.isEditing;
-    final editingId = currentState.editingEntryId;
+  void _insertAtSelection(String insertText) {
+    final value = _contentController.value;
+    final text = value.text;
+    final selection = value.selection;
 
+    if (!selection.isValid || selection.start < 0) {
+      _contentController.text += insertText;
+      _contentController.selection = TextSelection.collapsed(
+        offset: _contentController.text.length,
+      );
+      _notifyContentChanged();
+      return;
+    }
+
+    final updated = text.replaceRange(
+      selection.start,
+      selection.end,
+      insertText,
+    );
+    final cursor = selection.start + insertText.length;
+
+    _contentController.value = TextEditingValue(
+      text: updated,
+      selection: TextSelection.collapsed(offset: cursor),
+    );
+    _notifyContentChanged();
+  }
+
+  void _notifyContentChanged() {
+    ref
+        .read(journalEditorControllerProvider.notifier)
+        .updateContent(_contentController.text);
+  }
+
+  int _countWords(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) {
+      return 0;
+    }
+
+    return trimmed.split(RegExp(r'\s+')).length;
+  }
+
+  Future<void> _save() async {
     final saved = await ref
         .read(journalEditorControllerProvider.notifier)
         .save();
@@ -158,16 +242,7 @@ class _JournalEditorPageState extends ConsumerState<JournalEditorPage> {
     }
 
     if (saved) {
-      _titleController.clear();
-      _contentController.clear();
-      _tagsController.clear();
-      ref.invalidate(journalEntriesProvider);
-      if (editingId != null && editingId.isNotEmpty) {
-        ref.read(selectedEntryIdProvider.notifier).state = editingId;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(wasEditing ? 'Entry updated' : 'Entry saved')),
-      );
+      Navigator.of(context).pop(true);
       return;
     }
 
@@ -178,393 +253,130 @@ class _JournalEditorPageState extends ConsumerState<JournalEditorPage> {
       ).showSnackBar(SnackBar(content: Text(message)));
     }
   }
-
-  void _clearEditor() {
-    ref.read(journalEditorControllerProvider.notifier).clearEditor();
-    _titleController.clear();
-    _contentController.clear();
-    _tagsController.clear();
-  }
-
-  void _clearFilters() {
-    _searchController.clear();
-    _tagFilterController.clear();
-    ref.read(journalSearchQueryProvider.notifier).state = '';
-    ref.read(journalTagFilterProvider.notifier).state = '';
-  }
-
-  void _loadEntryForEditing(JournalEntry entry) {
-    ref.read(journalEditorControllerProvider.notifier).loadForEditing(entry);
-    ref.read(selectedEntryIdProvider.notifier).state = entry.id;
-    _titleController.text = entry.title;
-    _contentController.text = entry.content;
-    _tagsController.text = entry.tags.join(', ');
-  }
-
-  Future<void> _confirmAndDeleteEntry(JournalEntry entry) async {
-    final shouldDelete = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Delete this entry?'),
-          content: const Text(
-            'This action cannot be undone unless restored now.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Delete'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (shouldDelete != true || !mounted) {
-      return;
-    }
-
-    await ref.read(journalRepositoryProvider).deleteEntry(entry.id);
-    if (!mounted) {
-      return;
-    }
-
-    if (ref.read(journalEditorControllerProvider).editingEntryId == entry.id) {
-      _clearEditor();
-    }
-
-    if (ref.read(selectedEntryIdProvider) == entry.id) {
-      ref.read(selectedEntryIdProvider.notifier).state = null;
-    }
-
-    ref.invalidate(journalEntriesProvider);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Text('Entry deleted'),
-        action: SnackBarAction(
-          label: 'UNDO',
-          onPressed: () {
-            unawaited(_restoreDeletedEntry(entry));
-          },
-        ),
-      ),
-    );
-  }
-
-  Future<void> _restoreDeletedEntry(JournalEntry entry) async {
-    await ref.read(journalRepositoryProvider).upsertEntry(entry);
-    if (!mounted) {
-      return;
-    }
-
-    ref.read(selectedEntryIdProvider.notifier).state = entry.id;
-    ref.invalidate(journalEntriesProvider);
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Entry restored')));
-  }
 }
 
-class _EditorPane extends StatelessWidget {
-  const _EditorPane({
-    required this.titleController,
-    required this.contentController,
-    required this.tagsController,
-    required this.editorState,
-    required this.onSave,
-    required this.onClear,
-    required this.onTitleChanged,
-    required this.onContentChanged,
-    required this.onTagsChanged,
+class _FormattingToolbar extends StatelessWidget {
+  const _FormattingToolbar({
+    required this.compact,
+    required this.onBold,
+    required this.onItalic,
+    required this.onHeading,
+    required this.onBullet,
+    required this.onQuote,
   });
 
-  final TextEditingController titleController;
-  final TextEditingController contentController;
-  final TextEditingController tagsController;
-  final JournalEditorState editorState;
-  final VoidCallback onSave;
-  final VoidCallback onClear;
-  final ValueChanged<String> onTitleChanged;
-  final ValueChanged<String> onContentChanged;
-  final ValueChanged<String> onTagsChanged;
+  final bool compact;
+  final VoidCallback onBold;
+  final VoidCallback onItalic;
+  final VoidCallback onHeading;
+  final VoidCallback onBullet;
+  final VoidCallback onQuote;
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            TextField(
-              key: JournalEditorPage.titleFieldKey,
-              controller: titleController,
-              textInputAction: TextInputAction.next,
-              decoration: const InputDecoration(
-                labelText: 'Title',
-                hintText: 'What is on your mind?',
-              ),
-              onChanged: onTitleChanged,
-            ),
-            const SizedBox(height: 12),
-            Expanded(
-              child: TextField(
-                key: JournalEditorPage.contentFieldKey,
-                controller: contentController,
-                maxLines: null,
-                expands: true,
-                decoration: const InputDecoration(
-                  alignLabelWithHint: true,
-                  labelText: 'Entry',
-                  hintText: 'Write freely...',
-                ),
-                onChanged: onContentChanged,
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              key: JournalEditorPage.tagsFieldKey,
-              controller: tagsController,
-              decoration: const InputDecoration(
-                labelText: 'Tags',
-                hintText: 'wellness, gratitude',
-              ),
-              onChanged: onTagsChanged,
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton(
-                    key: JournalEditorPage.saveButtonKey,
-                    onPressed: editorState.canSave ? onSave : null,
-                    child: editorState.isSaving
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : Text(
-                            editorState.isEditing
-                                ? 'Update Entry'
-                                : 'Save Entry',
-                          ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                TextButton(
-                  key: JournalEditorPage.clearEditorButtonKey,
-                  onPressed: onClear,
-                  child: const Text('Clear'),
-                ),
-              ],
-            ),
-          ],
-        ),
+    final buttons = [
+      OutlinedButton(
+        key: JournalEditorPage.boldButtonKey,
+        onPressed: onBold,
+        child: const Text('Bold'),
       ),
-    );
-  }
-}
+      OutlinedButton(
+        key: JournalEditorPage.italicButtonKey,
+        onPressed: onItalic,
+        child: const Text('Italic'),
+      ),
+      OutlinedButton(
+        key: JournalEditorPage.headingButtonKey,
+        onPressed: onHeading,
+        child: const Text('H2'),
+      ),
+      OutlinedButton(
+        key: JournalEditorPage.bulletButtonKey,
+        onPressed: onBullet,
+        child: const Text('Bullet'),
+      ),
+      OutlinedButton(
+        key: JournalEditorPage.quoteButtonKey,
+        onPressed: onQuote,
+        child: const Text('Quote'),
+      ),
+    ];
 
-class _EntriesPane extends ConsumerWidget {
-  const _EntriesPane({
-    required this.searchController,
-    required this.tagFilterController,
-    required this.onSearchChanged,
-    required this.onTagFilterChanged,
-    required this.onClearFilters,
-    required this.onSelectEntry,
-    required this.onDeleteEntry,
-  });
-
-  final TextEditingController searchController;
-  final TextEditingController tagFilterController;
-  final ValueChanged<String> onSearchChanged;
-  final ValueChanged<String> onTagFilterChanged;
-  final VoidCallback onClearFilters;
-  final ValueChanged<JournalEntry> onSelectEntry;
-  final ValueChanged<JournalEntry> onDeleteEntry;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final selectedEntryAsync = ref.watch(selectedEntryProvider);
-    final entriesAsyncValue = ref.watch(journalEntriesProvider);
-    final entriesSection = entriesAsyncValue.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (_, _) => const Text('Unable to load entries right now.'),
-      data: (entries) {
-        if (entries.isEmpty) {
-          return const Text('No journal entries yet.');
+    if (compact) {
+      final compactChildren = <Widget>[];
+      for (var i = 0; i < buttons.length; i++) {
+        compactChildren.add(buttons[i]);
+        if (i != buttons.length - 1) {
+          compactChildren.add(const SizedBox(width: 8));
         }
+      }
 
-        return Column(
-          key: JournalEditorPage.recentEntriesListKey,
-          children: [
-            for (var i = 0; i < entries.length; i++) ...[
-              _JournalEntryListTile(
-                entry: entries[i],
-                onTap: () => onSelectEntry(entries[i]),
-                onDelete: () => onDeleteEntry(entries[i]),
-              ),
-              if (i < entries.length - 1) const Divider(height: 1),
-            ],
-          ],
-        );
-      },
-    );
+      return SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(children: compactChildren),
+      );
+    }
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              TextField(
-                key: JournalEditorPage.searchFieldKey,
-                controller: searchController,
-                decoration: const InputDecoration(
-                  labelText: 'Search',
-                  hintText: 'Search title or content',
-                  prefixIcon: Icon(Icons.search),
-                ),
-                onChanged: onSearchChanged,
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      key: JournalEditorPage.tagFilterFieldKey,
-                      controller: tagFilterController,
-                      decoration: const InputDecoration(
-                        labelText: 'Tag Filter',
-                        hintText: 'Filter by tag',
-                        prefixIcon: Icon(Icons.tag),
-                      ),
-                      onChanged: onTagFilterChanged,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  TextButton(
-                    key: JournalEditorPage.clearFiltersButtonKey,
-                    onPressed: onClearFilters,
-                    child: const Text('Reset'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              selectedEntryAsync.when(
-                loading: () => const SizedBox.shrink(),
-                error: (_, _) => const SizedBox.shrink(),
-                data: (entry) {
-                  if (entry == null) {
-                    return const SizedBox.shrink();
-                  }
-
-                  return _EntryDetailsCard(entry: entry);
-                },
-              ),
-              if (selectedEntryAsync.asData?.value != null)
-                const SizedBox(height: 12),
-              Text(
-                'Recent Entries',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              entriesSection,
-            ],
-          ),
-        ),
-      ),
-    );
+    return Wrap(spacing: 8, runSpacing: 8, children: buttons);
   }
 }
 
-class _EntryDetailsCard extends StatelessWidget {
-  const _EntryDetailsCard({required this.entry});
-
-  final JournalEntry entry;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text('Entry Details', style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 6),
-          Text(entry.title, style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 4),
-          Text(entry.content),
-          if (entry.tags.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: entry.tags
-                  .map((tag) => Chip(label: Text(tag)))
-                  .toList(growable: false),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _JournalEntryListTile extends StatelessWidget {
-  const _JournalEntryListTile({
-    required this.entry,
-    required this.onTap,
-    required this.onDelete,
+class _EditorGuideCard extends StatelessWidget {
+  const _EditorGuideCard({
+    required this.isEditing,
+    required this.words,
+    required this.characters,
   });
 
-  final JournalEntry entry;
-  final VoidCallback onTap;
-  final VoidCallback onDelete;
+  final bool isEditing;
+  final int words;
+  final int characters;
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      onTap: onTap,
-      title: Text(entry.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: Text(
-        entry.content,
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        gradient: LinearGradient(
+          colors: [colorScheme.primaryContainer, colorScheme.tertiaryContainer],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
       ),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
+      child: Row(
         children: [
-          Text(
-            _formatDate(entry.updatedAt),
-            style: Theme.of(context).textTheme.bodySmall,
+          Icon(
+            isEditing ? Icons.edit_note : Icons.auto_stories,
+            color: colorScheme.onPrimaryContainer,
           ),
-          IconButton(
-            key: ValueKey<String>('delete_entry_${entry.id}'),
-            tooltip: 'Delete entry',
-            onPressed: onDelete,
-            icon: const Icon(Icons.delete_outline),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              isEditing
+                  ? 'Refine your reflection with specific details and outcomes.'
+                  : 'Start with one concrete moment, then add what you felt and learned.',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '$words words',
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+              Text(
+                '$characters chars',
+                style: Theme.of(context).textTheme.labelSmall,
+              ),
+            ],
           ),
         ],
       ),
     );
-  }
-
-  String _formatDate(DateTime value) {
-    final local = value.toLocal();
-    final month = local.month.toString().padLeft(2, '0');
-    final day = local.day.toString().padLeft(2, '0');
-    return '${local.year}-$month-$day';
   }
 }

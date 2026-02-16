@@ -14,6 +14,9 @@ import 'package:ai_journal/features/journal/domain/models/journal_entry.dart';
 import 'package:ai_journal/features/journal/domain/repositories/journal_repository.dart';
 import 'package:ai_journal/features/journal/presentation/state/journal_editor_controller.dart';
 import 'package:ai_journal/features/journal/presentation/state/journal_editor_state.dart';
+import 'package:ai_journal/features/settings/data/local/app_settings_local_service.dart';
+import 'package:ai_journal/features/settings/domain/models/app_settings.dart';
+import 'package:ai_journal/features/settings/presentation/state/app_settings_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
@@ -61,10 +64,24 @@ final journalRepositoryProvider = Provider<JournalRepository>((ref) {
   );
 });
 
+final appSettingsLocalServiceProvider = Provider<AppSettingsLocalService>((ref) {
+  return AppSettingsLocalService(store: ref.watch(keyValueStoreProvider));
+});
+
+final appSettingsControllerProvider =
+    StateNotifierProvider<AppSettingsController, AppSettings>((ref) {
+      return AppSettingsController(
+        service: ref.watch(appSettingsLocalServiceProvider),
+      );
+    });
+
+final appThemeModeProvider = Provider<ThemeMode>((ref) {
+  final settings = ref.watch(appSettingsControllerProvider);
+  return settings.darkMode ? ThemeMode.dark : ThemeMode.light;
+});
+
 final journalSearchQueryProvider = StateProvider<String>((ref) => '');
 final journalTagFilterProvider = StateProvider<String>((ref) => '');
-final selectedEntryIdProvider = StateProvider<String?>((ref) => null);
-final themeModeProvider = StateProvider<ThemeMode>((ref) => ThemeMode.light);
 
 final journalEntriesProvider = FutureProvider<List<JournalEntry>>((ref) async {
   final repository = ref.watch(journalRepositoryProvider);
@@ -73,22 +90,17 @@ final journalEntriesProvider = FutureProvider<List<JournalEntry>>((ref) async {
   return repository.listEntries(query: query, tag: tag);
 });
 
-final selectedEntryProvider = Provider<AsyncValue<JournalEntry?>>((ref) {
-  final selectedId = ref.watch(selectedEntryIdProvider);
-  final entriesAsync = ref.watch(journalEntriesProvider);
+final journalAllEntriesProvider = FutureProvider<List<JournalEntry>>((ref) async {
+  final repository = ref.watch(journalRepositoryProvider);
+  return repository.listEntries();
+});
 
-  return entriesAsync.whenData((entries) {
-    if (selectedId == null || selectedId.isEmpty) {
-      return null;
-    }
-
-    for (final entry in entries) {
-      if (entry.id == selectedId) {
-        return entry;
-      }
-    }
-    return null;
-  });
+final journalEntryProvider = FutureProvider.family<JournalEntry?, String>((
+  ref,
+  id,
+) async {
+  final repository = ref.watch(journalRepositoryProvider);
+  return repository.getEntryById(id);
 });
 
 final _uuid = Uuid();
