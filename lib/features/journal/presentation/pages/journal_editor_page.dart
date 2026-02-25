@@ -104,24 +104,23 @@ class _JournalEditorPageState extends ConsumerState<JournalEditorPage> {
                     key: JournalEditorPage.titleFieldKey,
                     controller: _titleController,
                     textInputAction: TextInputAction.next,
+                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
                     decoration: const InputDecoration(
-                      labelText: 'Title',
-                      hintText: 'Name this entry',
+                      hintText: 'Title',
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      filled: false,
+                      contentPadding: EdgeInsets.zero,
                     ),
                     onChanged: ref
                         .read(journalEditorControllerProvider.notifier)
                         .updateTitle,
                   ),
-                  const SizedBox(height: 12),
-                  _FormattingToolbar(
-                    compact: isCompact,
-                    onBold: () => _wrapSelection('**', '**'),
-                    onItalic: () => _wrapSelection('_', '_'),
-                    onHeading: () => _insertAtSelection('\n## '),
-                    onBullet: () => _insertAtSelection('\n- '),
-                    onQuote: () => _insertAtSelection('\n> '),
-                  ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 16),
                   Expanded(
                     child: TextField(
                       key: JournalEditorPage.contentFieldKey,
@@ -129,37 +128,40 @@ class _JournalEditorPageState extends ConsumerState<JournalEditorPage> {
                       maxLines: null,
                       expands: true,
                       textAlignVertical: TextAlignVertical.top,
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.onSurface.withValues(alpha: 0.85),
+                      ),
                       decoration: const InputDecoration(
-                        alignLabelWithHint: true,
-                        labelText: 'Write',
-                        hintText: 'Capture your thoughts with clarity...',
+                        hintText: 'Start writing...',
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        filled: false,
+                        contentPadding: EdgeInsets.zero,
                       ),
                       onChanged: ref
                           .read(journalEditorControllerProvider.notifier)
                           .updateContent,
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    key: JournalEditorPage.tagsFieldKey,
-                    controller: _tagsController,
-                    decoration: const InputDecoration(
-                      labelText: 'Tags',
-                      hintText: 'wellness, work, gratitude',
-                    ),
-                    onChanged: ref
+                  const SizedBox(height: 16),
+                  _EditorBottomBar(
+                    tagsController: _tagsController,
+                    onTagsChanged: ref
                         .read(journalEditorControllerProvider.notifier)
                         .updateTagsInput,
+                    words: words,
+                    isEditing: editorState.isEditing,
+                    canSave: editorState.canSave,
+                    onSave: _save,
                   ),
-                  const SizedBox(height: 16),
-                  FilledButton.icon(
-                    key: JournalEditorPage.saveButtonKey,
-                    onPressed: editorState.canSave ? _save : null,
-                    icon: const Icon(Icons.save_outlined),
-                    label: Text(
-                      editorState.isEditing ? 'Update Entry' : 'Save Entry',
+                  if (editorState.isSaving)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 16),
+                      child: LinearProgressIndicator(),
                     ),
-                  ),
                 ],
               ),
             ),
@@ -286,69 +288,80 @@ class _JournalEditorPageState extends ConsumerState<JournalEditorPage> {
   }
 }
 
-class _FormattingToolbar extends StatelessWidget {
-  const _FormattingToolbar({
-    required this.compact,
-    required this.onBold,
-    required this.onItalic,
-    required this.onHeading,
-    required this.onBullet,
-    required this.onQuote,
+class _EditorBottomBar extends StatelessWidget {
+  const _EditorBottomBar({
+    required this.tagsController,
+    required this.onTagsChanged,
+    required this.words,
+    required this.isEditing,
+    required this.canSave,
+    required this.onSave,
   });
 
-  final bool compact;
-  final VoidCallback onBold;
-  final VoidCallback onItalic;
-  final VoidCallback onHeading;
-  final VoidCallback onBullet;
-  final VoidCallback onQuote;
+  final TextEditingController tagsController;
+  final ValueChanged<String> onTagsChanged;
+  final int words;
+  final bool isEditing;
+  final bool canSave;
+  final VoidCallback onSave;
 
   @override
   Widget build(BuildContext context) {
-    final buttons = [
-      OutlinedButton(
-        key: JournalEditorPage.boldButtonKey,
-        onPressed: onBold,
-        child: const Text('Bold'),
-      ),
-      OutlinedButton(
-        key: JournalEditorPage.italicButtonKey,
-        onPressed: onItalic,
-        child: const Text('Italic'),
-      ),
-      OutlinedButton(
-        key: JournalEditorPage.headingButtonKey,
-        onPressed: onHeading,
-        child: const Text('H2'),
-      ),
-      OutlinedButton(
-        key: JournalEditorPage.bulletButtonKey,
-        onPressed: onBullet,
-        child: const Text('Bullet'),
-      ),
-      OutlinedButton(
-        key: JournalEditorPage.quoteButtonKey,
-        onPressed: onQuote,
-        child: const Text('Quote'),
-      ),
-    ];
-
-    if (compact) {
-      final compactChildren = <Widget>[];
-      for (var i = 0; i < buttons.length; i++) {
-        compactChildren.add(buttons[i]);
-        if (i != buttons.length - 1) {
-          compactChildren.add(const SizedBox(width: 8));
-        }
-      }
-
-      return SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(children: compactChildren),
-      );
-    }
-
-    return Wrap(spacing: 8, runSpacing: 8, children: buttons);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Divider(height: 1),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                key: JournalEditorPage.tagsFieldKey,
+                controller: tagsController,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                decoration: const InputDecoration(
+                  hintText: '# Add tags (comma separated)',
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  filled: false,
+                  contentPadding: EdgeInsets.zero,
+                  prefixIconConstraints: BoxConstraints(
+                    minWidth: 32,
+                    minHeight: 16,
+                  ),
+                  prefixIcon: Icon(Icons.tag, size: 16),
+                ),
+                onChanged: onTagsChanged,
+              ),
+            ),
+            const SizedBox(width: 16),
+            Text(
+              '$words words',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.outline,
+              ),
+            ),
+            const SizedBox(width: 16),
+            FilledButton.icon(
+              key: JournalEditorPage.saveButtonKey,
+              onPressed: canSave ? onSave : null,
+              icon: const Icon(Icons.save_outlined, size: 18),
+              label: Text(isEditing ? 'Update' : 'Save'),
+              style: FilledButton.styleFrom(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                minimumSize: const Size(0, 36),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
   }
 }
 

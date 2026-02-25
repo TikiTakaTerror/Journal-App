@@ -10,6 +10,7 @@ import 'package:ai_journal/features/ai/domain/models/ai_responses.dart';
 import 'package:ai_journal/features/ai/infrastructure/openai/openai_config.dart';
 import 'package:ai_journal/features/journal/domain/models/journal_entry.dart';
 import 'package:http/http.dart' as http;
+import 'package:retry/retry.dart';
 
 /// Raised when OpenAI is requested without valid runtime configuration.
 class OpenAIConfigurationException implements Exception {
@@ -207,26 +208,50 @@ class OpenAICloudAIService implements AIService {
       'temperature': temperature,
     };
 
-    http.Response response;
     try {
-      response = await _httpClient
-          .post(uri, headers: headers, body: jsonEncode(payload))
-          .timeout(_timeout);
+      final response = await retry(
+        () async {
+          final res = await _httpClient
+              .post(uri, headers: headers, body: jsonEncode(payload))
+              .timeout(_timeout);
+
+          if (res.statusCode >= 500 || res.statusCode == 429) {
+            // These are generally transient or rate-limiting errors we can retry.
+            throw _TransientHttpException(res.statusCode);
+          }
+
+          if (res.statusCode < 200 || res.statusCode >= 300) {
+            // Unrecoverable errors (400, 401, 403, 404, etc.)
+            throw OpenAIServiceException(
+              _extractErrorMessage(res.body, res.statusCode),
+            );
+          }
+
+          return res;
+        },
+        retryIf: (e) =>
+            e is TimeoutException ||
+            e is http.ClientException ||
+            e is _TransientHttpException,
+        maxAttempts: 3,
+        delayFactor: const Duration(seconds: 1),
+        maxDelay: const Duration(seconds: 5),
+      );
+
+      return _extractAssistantMessage(response.body);
     } on TimeoutException {
       throw const OpenAIServiceException('OpenAI request timed out.');
-    } catch (_) {
+    } on OpenAIServiceException {
+      rethrow; // Pass through our unrecoverable errors directly.
+    } on _TransientHttpException {
+      throw const OpenAIServiceException(
+        'OpenAI service is currently overloaded or down.',
+      );
+    } catch (e) {
       throw const OpenAIServiceException(
         'OpenAI request failed before receiving a response.',
       );
     }
-
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw OpenAIServiceException(
-        _extractErrorMessage(response.body, response.statusCode),
-      );
-    }
-
-    return _extractAssistantMessage(response.body);
   }
 
   String _buildMemoryContext({
@@ -365,4 +390,13 @@ class OpenAICloudAIService implements AIService {
 
     return normalized;
   }
+}
+
+class _TransientHttpException implements Exception {
+  const _TransientHttpException(this.statusCode);
+
+  final int statusCode;
+
+  @override
+  String toString() => '_TransientHttpException: $statusCode';
 }

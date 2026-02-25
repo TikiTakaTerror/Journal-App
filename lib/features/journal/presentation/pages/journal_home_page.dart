@@ -228,10 +228,14 @@ class _FilterPanel extends StatelessWidget {
       onChanged: onTagChanged,
     );
 
-    final resetButton = OutlinedButton.icon(
+    final resetButton = OutlinedButton(
       onPressed: onReset,
-      icon: const Icon(Icons.refresh),
-      label: const Text('Reset'),
+      style: OutlinedButton.styleFrom(
+        side: BorderSide.none,
+        foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+      ),
+      child: const Text('Clear'),
     );
 
     if (isCompact) {
@@ -294,15 +298,8 @@ class _HeaderCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        gradient: LinearGradient(
-          colors: [colorScheme.primaryContainer, colorScheme.tertiaryContainer],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-      ),
+      padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 8),
+      decoration: BoxDecoration(color: Colors.transparent),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -317,8 +314,8 @@ class _HeaderCard extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           Wrap(
-            spacing: 8,
-            runSpacing: 8,
+            spacing: 12,
+            runSpacing: 12,
             children: [
               _QuickTagChip(label: 'wellness', onTap: onQuickTag),
               _QuickTagChip(label: 'work', onTap: onQuickTag),
@@ -356,62 +353,64 @@ class _SmartPromptPanel extends StatelessWidget {
     final hasPrompt = promptText != null && promptText!.trim().isNotEmpty;
     final colorScheme = Theme.of(context).colorScheme;
 
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        color: colorScheme.surface.withValues(alpha: 0.55),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.auto_awesome_outlined, size: 18),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Smart Journaling Prompt',
-                  style: Theme.of(context).textTheme.titleSmall,
-                ),
-              ),
-              FilledButton.tonalIcon(
-                key: JournalHomePage.generatePromptButtonKey,
-                onPressed: promptLoading
-                    ? null
-                    : () {
-                        unawaited(onGeneratePrompt());
-                      },
-                icon: promptLoading
-                    ? const SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.bolt),
-                label: const Text('Generate'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            key: JournalHomePage.promptTextKey,
-            hasPrompt
-                ? promptText!
-                : 'Generate a focused prompt based on recent themes in your journal.',
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-          if (promptError != null && promptError!.isNotEmpty) ...[
-            const SizedBox(height: 6),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.auto_awesome, size: 16, color: colorScheme.primary),
+            const SizedBox(width: 8),
             Text(
-              promptError!,
+              'Inspire Me',
               style: Theme.of(
                 context,
-              ).textTheme.bodySmall?.copyWith(color: colorScheme.error),
+              ).textTheme.labelLarge?.copyWith(color: colorScheme.primary),
             ),
+            const Spacer(),
+            if (promptLoading)
+              const SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            else
+              IconButton(
+                key: JournalHomePage.generatePromptButtonKey,
+                onPressed: () {
+                  unawaited(onGeneratePrompt());
+                },
+                icon: const Icon(Icons.refresh, size: 18),
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                color: colorScheme.outline,
+              ),
           ],
+        ),
+        const SizedBox(height: 8),
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 400),
+          child: Text(
+            key: ValueKey(hasPrompt ? promptText : 'empty_prompt'),
+            hasPrompt
+                ? promptText!
+                : 'Need a spark? Tap refresh to generate a personalized prompt.',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              fontStyle: FontStyle.italic,
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+        if (promptError != null && promptError!.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text(
+            'Unable to load prompt right now. Try again later.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colorScheme.outline, // Subtle error styling
+            ),
+          ),
         ],
-      ),
+      ],
     );
   }
 }
@@ -422,11 +421,17 @@ class _QuickTagChip extends StatelessWidget {
   final String label;
   final ValueChanged<String> onTap;
 
-  @override
   Widget build(BuildContext context) {
     return ActionChip(
-      label: Text('#$label'),
-      avatar: const Icon(Icons.local_offer_outlined, size: 16),
+      label: Text(
+        '#$label',
+        style: TextStyle(color: Theme.of(context).colorScheme.primary),
+      ),
+      backgroundColor: Theme.of(
+        context,
+      ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+      side: BorderSide.none,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       onPressed: () => onTap(label),
     );
   }
@@ -438,14 +443,25 @@ class _EntryCard extends StatelessWidget {
   final JournalEntry entry;
   final VoidCallback onTap;
 
-  @override
   Widget build(BuildContext context) {
     return Card(
+      elevation: 0,
+      margin: EdgeInsets.zero,
+      color: Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color: Theme.of(
+            context,
+          ).colorScheme.outlineVariant.withValues(alpha: 0.4),
+          width: 1,
+        ),
+      ),
       clipBehavior: Clip.hardEdge,
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.all(20),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -527,18 +543,22 @@ class _EmptyState extends StatelessWidget {
                 children: [
                   Icon(
                     Icons.edit_note,
-                    size: 56,
-                    color: Theme.of(context).colorScheme.primary,
+                    size: 48,
+                    color: Theme.of(context).colorScheme.outline,
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 16),
                   Text(
-                    'No journal entries yet.',
-                    style: Theme.of(context).textTheme.titleMedium,
+                    'Your space to reflect.',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 8),
                   Text(
-                    'Press “New Entry” to start writing.',
-                    style: Theme.of(context).textTheme.bodyMedium,
+                    'Capture today while it is fresh.',
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      color: Theme.of(context).colorScheme.outline,
+                    ),
                   ),
                 ],
               ),

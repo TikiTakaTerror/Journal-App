@@ -41,6 +41,8 @@ dependencies:
   sqflite_sqlcipher: ^3.4.0
   sqlcipher_flutter_libs: ^0.6.8
   uuid: ^4.5.1
+  retry: ^3.1.2
+  google_fonts: ^8.0.2
 
 dev_dependencies:
   flutter_test:

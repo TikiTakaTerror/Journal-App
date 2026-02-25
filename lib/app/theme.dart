@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 class AppTheme {
   const AppTheme._();
@@ -40,30 +41,30 @@ class AppTheme {
       colorScheme: scheme,
     );
 
-    final textTheme = base.textTheme.copyWith(
-      headlineLarge: base.textTheme.headlineLarge?.copyWith(
+    final lora = GoogleFonts.loraTextTheme(base.textTheme);
+    final inter = GoogleFonts.interTextTheme(base.textTheme);
+
+    final textTheme = inter.copyWith(
+      headlineLarge: lora.headlineLarge?.copyWith(
         fontWeight: FontWeight.w700,
-        letterSpacing: -0.3,
+        letterSpacing: -0.5,
       ),
-      headlineMedium: base.textTheme.headlineMedium?.copyWith(
+      headlineMedium: lora.headlineMedium?.copyWith(
         fontWeight: FontWeight.w700,
-        letterSpacing: -0.3,
+        letterSpacing: -0.5,
       ),
-      headlineSmall: base.textTheme.headlineSmall?.copyWith(
-        fontWeight: FontWeight.w700,
-        letterSpacing: -0.3,
-      ),
-      titleLarge: base.textTheme.titleLarge?.copyWith(
-        fontWeight: FontWeight.w700,
-      ),
-      titleMedium: base.textTheme.titleMedium?.copyWith(
+      headlineSmall: lora.headlineSmall?.copyWith(
         fontWeight: FontWeight.w600,
+        letterSpacing: -0.3,
       ),
-      labelLarge: base.textTheme.labelLarge?.copyWith(
+      titleLarge: lora.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+      titleMedium: inter.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+      labelLarge: inter.labelLarge?.copyWith(
         fontWeight: FontWeight.w600,
+        letterSpacing: 0.2,
       ),
-      bodyLarge: base.textTheme.bodyLarge?.copyWith(height: 1.45),
-      bodyMedium: base.textTheme.bodyMedium?.copyWith(height: 1.4),
+      bodyLarge: lora.bodyLarge?.copyWith(height: 1.6, fontSize: 18),
+      bodyMedium: inter.bodyMedium?.copyWith(height: 1.5),
     );
 
     final inputBorder = OutlineInputBorder(
