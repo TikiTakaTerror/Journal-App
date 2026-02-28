@@ -1,4 +1,6 @@
 import 'package:ai_journal/app/providers.dart';
+import 'package:ai_journal/features/ai/domain/contracts/ai_api_key_store.dart';
+import 'package:ai_journal/features/ai/presentation/state/openai_api_key_controller.dart';
 import 'package:ai_journal/features/journal/domain/models/journal_entry.dart';
 import 'package:ai_journal/features/settings/domain/models/app_settings.dart';
 import 'package:flutter/material.dart';
@@ -22,6 +24,18 @@ class SettingsPage extends ConsumerStatefulWidget {
   static const Key openAiKeyStatusKey = ValueKey<String>(
     'settings_openai_key_status',
   );
+  static const Key openAiSetKeyButtonKey = ValueKey<String>(
+    'settings_openai_set_key_button',
+  );
+  static const Key openAiReplaceKeyButtonKey = ValueKey<String>(
+    'settings_openai_replace_key_button',
+  );
+  static const Key openAiRemoveKeyButtonKey = ValueKey<String>(
+    'settings_openai_remove_key_button',
+  );
+  static const Key openAiApiKeyFieldKey = ValueKey<String>(
+    'settings_openai_api_key_field',
+  );
   static const Key exportButtonKey = ValueKey<String>('settings_export_button');
   static const Key wipeDataButtonKey = ValueKey<String>(
     'settings_wipe_data_button',
@@ -38,7 +52,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     final settings = ref.watch(appSettingsControllerProvider);
-    final openAiConfig = ref.watch(openAIConfigProvider);
+    final openAiKeyState = ref.watch(openAIApiKeyControllerProvider);
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -92,19 +106,98 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               ListTile(
                 key: SettingsPage.openAiKeyStatusKey,
                 contentPadding: EdgeInsets.zero,
-                title: Text(
-                  openAiConfig.hasApiKey
-                      ? 'OpenAI key: Detected'
-                      : 'OpenAI key: Missing',
+                title: Text(_openAiKeyTitle(openAiKeyState)),
+                subtitle: Text(_openAiKeySubtitle(openAiKeyState)),
+                trailing: openAiKeyState.isLoading
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Icon(_openAiKeyStatusIcon(openAiKeyState)),
+              ),
+              if (openAiKeyState.maskedPreview != null) ...[
+                const SizedBox(height: 4),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Key preview: ${openAiKeyState.maskedPreview}',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
                 ),
-                subtitle: const Text(
-                  'Loaded from --dart-define / --dart-define-from-file.',
+              ],
+              if (openAiKeyState.usingStoredKey &&
+                  openAiKeyState.storageProtection ==
+                      AIApiKeyStorageProtection.localFallback) ...[
+                const SizedBox(height: 6),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Warning: secure storage was unavailable, so the key is stored in local app preferences on this device.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
                 ),
-                trailing: Icon(
-                  openAiConfig.hasApiKey
-                      ? Icons.verified_outlined
-                      : Icons.warning_amber_outlined,
+              ],
+              if (openAiKeyState.errorMessage != null &&
+                  openAiKeyState.errorMessage!.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    openAiKeyState.errorMessage!,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
                 ),
+              ],
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  if (openAiKeyState.usingStoredKey)
+                    OutlinedButton.icon(
+                      key: SettingsPage.openAiReplaceKeyButtonKey,
+                      onPressed: openAiKeyState.isSaving
+                          ? null
+                          : _replaceOpenAiKey,
+                      icon: openAiKeyState.isSaving
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.key_outlined),
+                      label: const Text('Replace key'),
+                    )
+                  else
+                    OutlinedButton.icon(
+                      key: SettingsPage.openAiSetKeyButtonKey,
+                      onPressed: openAiKeyState.isSaving ? null : _setOpenAiKey,
+                      icon: openAiKeyState.isSaving
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.key_outlined),
+                      label: Text(
+                        openAiKeyState.usingDevOverride ? 'Store local key' : 'Set key',
+                      ),
+                    ),
+                  if (openAiKeyState.usingStoredKey)
+                    FilledButton.tonalIcon(
+                      key: SettingsPage.openAiRemoveKeyButtonKey,
+                      onPressed: openAiKeyState.isSaving
+                          ? null
+                          : _removeOpenAiKey,
+                      icon: const Icon(Icons.delete_outline),
+                      label: const Text('Remove key'),
+                    ),
+                ],
               ),
             ],
           ),
@@ -227,6 +320,157 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     await ref
         .read(appSettingsControllerProvider.notifier)
         .setCloudAiConsent(true);
+  }
+
+  String _openAiKeyTitle(OpenAIApiKeyState state) {
+    if (state.isLoading) {
+      return 'OpenAI key: Checking local key';
+    }
+    if (state.usingStoredKey) {
+      return 'OpenAI key: Stored locally';
+    }
+    if (state.usingDevOverride) {
+      return 'OpenAI key: Using dev override';
+    }
+    return 'OpenAI key: Missing';
+  }
+
+  String _openAiKeySubtitle(OpenAIApiKeyState state) {
+    if (state.usingStoredKey) {
+      return switch (state.storageProtection) {
+        AIApiKeyStorageProtection.secureStorage =>
+          'Stored on this device using secure storage.',
+        AIApiKeyStorageProtection.localFallback =>
+          'Stored on this device with local fallback storage.',
+        AIApiKeyStorageProtection.none =>
+          'Stored on this device.',
+      };
+    }
+
+    if (state.usingDevOverride) {
+      return 'Loaded from --dart-define / --dart-define-from-file (development override).';
+    }
+
+    return 'Add a personal OpenAI API key to enable cloud AI after explicit consent.';
+  }
+
+  IconData _openAiKeyStatusIcon(OpenAIApiKeyState state) {
+    if (state.usingStoredKey || state.usingDevOverride) {
+      return Icons.verified_outlined;
+    }
+    return Icons.warning_amber_outlined;
+  }
+
+  Future<void> _setOpenAiKey() async {
+    await _saveOpenAiKeyFlow();
+  }
+
+  Future<void> _replaceOpenAiKey() async {
+    await _saveOpenAiKeyFlow();
+  }
+
+  Future<void> _saveOpenAiKeyFlow() async {
+    final controller = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    final value = await showDialog<String>(
+      context: context,
+      builder: (_) {
+        return AlertDialog(
+          title: const Text('Store OpenAI API key'),
+          content: Form(
+            key: formKey,
+            child: TextFormField(
+              key: SettingsPage.openAiApiKeyFieldKey,
+              controller: controller,
+              autofocus: true,
+              obscureText: true,
+              enableSuggestions: false,
+              autocorrect: false,
+              decoration: const InputDecoration(
+                labelText: 'API key',
+                hintText: 'sk-...',
+              ),
+              validator: (value) {
+                if (value == null || value.trim().isEmpty) {
+                  return 'Enter an API key';
+                }
+                return null;
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                if (formKey.currentState?.validate() != true) {
+                  return;
+                }
+                Navigator.of(context).pop(controller.text.trim());
+              },
+              child: const Text('Save key'),
+            ),
+          ],
+        );
+      },
+    );
+    if (value == null || value.trim().isEmpty) {
+      return;
+    }
+
+    await ref.read(openAIApiKeyControllerProvider.notifier).saveKey(value);
+    if (!mounted) {
+      return;
+    }
+
+    final state = ref.read(openAIApiKeyControllerProvider);
+    if (state.errorMessage == null || state.errorMessage!.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('OpenAI key stored locally.')),
+      );
+    }
+  }
+
+  Future<void> _removeOpenAiKey() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) {
+        return AlertDialog(
+          title: const Text('Remove stored OpenAI key?'),
+          content: const Text(
+            'This removes the locally stored key from this device. Development overrides (if present) may still be detected.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton.tonal(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Remove'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirm != true) {
+      return;
+    }
+
+    await ref.read(openAIApiKeyControllerProvider.notifier).removeKey();
+    if (!mounted) {
+      return;
+    }
+
+    final state = ref.read(openAIApiKeyControllerProvider);
+    if (state.errorMessage == null || state.errorMessage!.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Stored OpenAI key removed.')),
+      );
+    }
   }
 
   Future<void> _previewMarkdownExport() async {

@@ -14,30 +14,37 @@ import 'package:http/testing.dart';
 void main() {
   group('OpenAICloudAIService', () {
     test(
-      'generatePrompt sends authorized request and parses response',
+      'generatePrompt uses responses API by default and parses structured output',
       () async {
         final client = MockClient((request) async {
           expect(
             request.url.toString(),
-            'https://api.example.test/v1/chat/completions',
+            'https://api.example.test/v1/responses',
           );
           expect(request.headers['Authorization'], 'Bearer test-key');
           expect(request.headers['Content-Type'], 'application/json');
 
           final payload = jsonDecode(request.body) as Map<String, dynamic>;
           expect(payload['model'], 'gpt-4.1-nano');
-          expect(payload['max_tokens'], 512);
+          expect(payload['max_output_tokens'], 96);
+          expect(payload['instructions'], isA<String>());
+          expect(payload['store'], isFalse);
 
-          final messages = payload['messages'] as List<dynamic>;
-          expect(messages.length, 2);
+          final input = payload['input'] as List<dynamic>;
+          expect(input.length, 1);
+          expect(input.first, isA<Map<String, dynamic>>());
 
           return http.Response(
             jsonEncode(<String, Object?>{
-              'choices': <Object?>[
+              'output': <Object?>[
                 <String, Object?>{
-                  'message': <String, Object?>{
-                    'content': 'What emotion surprised you most today?',
-                  },
+                  'type': 'message',
+                  'content': <Object?>[
+                    <String, Object?>{
+                      'type': 'output_text',
+                      'text': 'What emotion surprised you most today?',
+                    },
+                  ],
                 },
               ],
             }),
@@ -71,7 +78,55 @@ void main() {
     );
 
     test(
-      'reflectOnEntry throws OpenAIServiceException on non-200 response',
+      'generatePrompt supports chat completions compatibility mode',
+      () async {
+        final client = MockClient((request) async {
+          expect(
+            request.url.toString(),
+            'https://api.example.test/v1/chat/completions',
+          );
+          final payload = jsonDecode(request.body) as Map<String, dynamic>;
+          expect(payload['max_tokens'], 96);
+          expect(payload['messages'], isA<List<dynamic>>());
+          expect(payload['store'], isFalse);
+
+          return http.Response(
+            jsonEncode(<String, Object?>{
+              'choices': <Object?>[
+                <String, Object?>{
+                  'message': <String, Object?>{
+                    'content': 'What did you learn about your energy today?',
+                  },
+                },
+              ],
+            }),
+            200,
+            headers: <String, String>{'content-type': 'application/json'},
+          );
+        });
+
+        final service = OpenAICloudAIService(
+          config: const OpenAIConfig(
+            apiKey: 'test-key',
+            baseUrl: 'https://api.example.test/v1',
+            chatModel: 'gpt-4.1-nano',
+            apiMode: OpenAIApiMode.chatCompletions,
+          ),
+          privacyPolicy: const AIPrivacyPolicy(
+            localOnlyAi: false,
+            cloudAiConsent: true,
+          ),
+          httpClient: client,
+        );
+
+        final prompt = await service.generatePrompt(AISmartPromptRequest());
+
+        expect(prompt, 'What did you learn about your energy today?');
+      },
+    );
+
+    test(
+      'reflectOnEntry maps retryable status metadata on non-200 response',
       () async {
         final client = MockClient((_) async {
           return http.Response(
@@ -79,12 +134,15 @@ void main() {
               'error': <String, Object?>{'message': 'Rate limit exceeded'},
             }),
             429,
-            headers: <String, String>{'content-type': 'application/json'},
+            headers: <String, String>{
+              'content-type': 'application/json',
+              'x-request-id': 'req_123',
+            },
           );
         });
 
         final service = OpenAICloudAIService(
-          config: const OpenAIConfig(apiKey: 'test-key'),
+          config: const OpenAIConfig(apiKey: 'test-key', maxRetries: 0),
           privacyPolicy: const AIPrivacyPolicy(
             localOnlyAi: false,
             cloudAiConsent: true,
@@ -102,11 +160,21 @@ void main() {
         expect(
           () => service.reflectOnEntry(AIReflectionRequest(entry: entry)),
           throwsA(
-            isA<OpenAIServiceException>().having(
-              (error) => error.message,
-              'message',
-              contains('Rate limit exceeded'),
-            ),
+            isA<OpenAIServiceException>()
+                .having(
+                  (error) => error.message,
+                  'message',
+                  contains('Rate limit exceeded'),
+                )
+                .having(
+                  (error) => error.code,
+                  'code',
+                  OpenAIServiceErrorCode.rateLimited,
+                )
+                .having((error) => error.retryable, 'retryable', isTrue)
+                .having((error) => error.statusCode, 'statusCode', 429)
+                .having((error) => error.requestId, 'requestId', 'req_123')
+                .having((error) => error.attempts, 'attempts', 1),
           ),
         );
       },
@@ -115,25 +183,18 @@ void main() {
     test('chatWithMemory trims chat history and retrieved entries', () async {
       final client = MockClient((request) async {
         final payload = jsonDecode(request.body) as Map<String, dynamic>;
-        final messages = payload['messages'] as List<dynamic>;
-        final body = jsonEncode(messages);
+        final body = jsonEncode(payload);
 
         expect(body, contains('latest-1'));
         expect(body, contains('latest-2'));
         expect(body, isNot(contains('older-history')));
-
         expect(body, contains('Entry A'));
         expect(body, isNot(contains('Entry B')));
+        expect(payload['max_output_tokens'], 320);
 
         return http.Response(
           jsonEncode(<String, Object?>{
-            'choices': <Object?>[
-              <String, Object?>{
-                'message': <String, Object?>{
-                  'content': 'You often recover when you take a short walk.',
-                },
-              },
-            ],
+            'output_text': 'You often recover when you take a short walk.',
           }),
           200,
           headers: <String, String>{'content-type': 'application/json'},
@@ -266,7 +327,15 @@ void main() {
 
         expect(
           () => service.generatePrompt(AISmartPromptRequest()),
-          throwsA(isA<OpenAIServiceException>()),
+          throwsA(
+            isA<OpenAIServiceException>()
+                .having(
+                  (error) => error.code,
+                  'code',
+                  OpenAIServiceErrorCode.invalidResponse,
+                )
+                .having((error) => error.retryable, 'retryable', isFalse),
+          ),
         );
       },
     );

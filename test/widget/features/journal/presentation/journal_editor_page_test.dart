@@ -1,5 +1,6 @@
 import 'package:ai_journal/app/app.dart';
 import 'package:ai_journal/app/providers.dart';
+import 'package:ai_journal/features/ai/domain/contracts/ai_api_key_store.dart';
 import 'package:ai_journal/features/ai/domain/contracts/ai_orchestrator.dart';
 import 'package:ai_journal/features/ai/domain/models/ai_requests.dart';
 import 'package:ai_journal/features/ai/domain/models/ai_responses.dart';
@@ -22,7 +23,7 @@ void main() {
     await _pumpJournalApp(tester, repository: fakeRepository);
 
     expect(find.text('Journal'), findsAtLeastNWidgets(1));
-    expect(find.text('Capture today while it is fresh'), findsOneWidget);
+    expect(find.text('Today'), findsOneWidget);
     expect(find.text('No journal entries yet.'), findsOneWidget);
     expect(find.byKey(MainShellPage.createEntryFabKey), findsOneWidget);
   });
@@ -61,6 +62,14 @@ void main() {
       'wellness, Morning Routine',
     );
 
+    await tester.ensureVisible(find.byKey(JournalEditorPage.saveButtonKey));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(JournalEditorPage.saveButtonKey));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Entry saved locally'), findsOneWidget);
+    await tester.ensureVisible(find.byKey(JournalEditorPage.saveButtonKey));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(JournalEditorPage.saveButtonKey));
     await tester.pumpAndSettle();
 
@@ -71,11 +80,10 @@ void main() {
       'morning-routine',
     ]);
 
-    expect(find.text('Entry saved'), findsOneWidget);
     expect(find.text('A better day'), findsOneWidget);
   });
 
-  testWidgets('shows AI reflection dialog after save when available', (
+  testWidgets('shows inline AI reflection section after save when available', (
     tester,
   ) async {
     final fakeRepository = _FakeJournalRepository();
@@ -104,15 +112,13 @@ void main() {
     );
     await tester.pump();
 
-    final saveButton = tester.widget<FilledButton>(
-      find.byKey(JournalEditorPage.saveButtonKey),
-    );
-    expect(saveButton.onPressed, isNotNull);
-
+    await tester.ensureVisible(find.byKey(JournalEditorPage.saveButtonKey));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(JournalEditorPage.saveButtonKey));
     await tester.pumpAndSettle();
 
     expect(fakeOrchestrator.reflectionRequests, hasLength(1));
+    expect(find.byKey(JournalEditorPage.reflectionDialogKey), findsOneWidget);
     expect(find.text('AI Reflection'), findsOneWidget);
     expect(
       find.text(
@@ -121,10 +127,11 @@ void main() {
       findsOneWidget,
     );
 
-    await tester.tap(find.text('Continue'));
+    await tester.ensureVisible(find.byKey(JournalEditorPage.saveButtonKey));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(JournalEditorPage.saveButtonKey));
     await tester.pumpAndSettle();
 
-    expect(find.text('Entry saved'), findsOneWidget);
     expect(find.text('Day'), findsOneWidget);
   });
 
@@ -230,6 +237,8 @@ void main() {
 
     await tester.tap(find.byKey(JournalEditorPage.saveButtonKey));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(JournalEditorPage.saveButtonKey));
+    await tester.pumpAndSettle();
 
     expect(find.text('Updated content'), findsOneWidget);
     expect(fakeRepository.savedEntries.single.content, 'Updated content');
@@ -275,6 +284,41 @@ void main() {
     );
     expect(cloudTile.value, isTrue);
   });
+
+  testWidgets('settings can store and remove OpenAI key locally', (tester) async {
+    await _pumpJournalApp(tester, repository: _FakeJournalRepository());
+
+    await tester.tap(find.text('Settings').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('OpenAI key: Missing'), findsOneWidget);
+    expect(find.byKey(SettingsPage.openAiSetKeyButtonKey), findsOneWidget);
+
+    await tester.ensureVisible(find.byKey(SettingsPage.openAiSetKeyButtonKey));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(SettingsPage.openAiSetKeyButtonKey));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(SettingsPage.openAiApiKeyFieldKey),
+      'sk-test-1234567890',
+    );
+    await tester.tap(find.text('Save key'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('OpenAI key: Stored locally'), findsOneWidget);
+    expect(find.byKey(SettingsPage.openAiReplaceKeyButtonKey), findsOneWidget);
+    expect(find.byKey(SettingsPage.openAiRemoveKeyButtonKey), findsOneWidget);
+
+    await tester.ensureVisible(find.byKey(SettingsPage.openAiRemoveKeyButtonKey));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(SettingsPage.openAiRemoveKeyButtonKey));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Remove'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('OpenAI key: Missing'), findsOneWidget);
+  });
 }
 
 Future<void> _pumpJournalApp(
@@ -282,9 +326,15 @@ Future<void> _pumpJournalApp(
   required _FakeJournalRepository repository,
   AIOrchestrator? aiOrchestrator,
 }) async {
+  await tester.binding.setSurfaceSize(const Size(1000, 900));
+  addTearDown(() async {
+    await tester.binding.setSurfaceSize(null);
+  });
+
   final overrides = [
     journalRepositoryProvider.overrideWithValue(repository),
     keyValueStoreProvider.overrideWithValue(_InMemoryKeyValueStore()),
+    aiApiKeyStoreProvider.overrideWithValue(_InMemoryAIApiKeyStore()),
   ];
   if (aiOrchestrator != null) {
     overrides.add(aiOrchestratorProvider.overrideWithValue(aiOrchestrator));
@@ -388,6 +438,38 @@ class _InMemoryKeyValueStore implements KeyValueStore {
   @override
   Future<void> writeString(String key, String value) async {
     _values[key] = value;
+  }
+}
+
+class _InMemoryAIApiKeyStore implements AIApiKeyStore {
+  String? _apiKey;
+
+  @override
+  Future<AIApiKeySnapshot> clear() async {
+    _apiKey = null;
+    return const AIApiKeySnapshot(
+      apiKey: null,
+      protection: AIApiKeyStorageProtection.none,
+    );
+  }
+
+  @override
+  Future<AIApiKeySnapshot> read() async {
+    return AIApiKeySnapshot(
+      apiKey: _apiKey,
+      protection: _apiKey == null
+          ? AIApiKeyStorageProtection.none
+          : AIApiKeyStorageProtection.secureStorage,
+    );
+  }
+
+  @override
+  Future<AIApiKeySnapshot> write(String apiKey) async {
+    _apiKey = apiKey.trim();
+    return AIApiKeySnapshot(
+      apiKey: _apiKey,
+      protection: AIApiKeyStorageProtection.secureStorage,
+    );
   }
 }
 

@@ -1,5 +1,17 @@
+import 'dart:async';
+
+import 'package:ai_journal/app/design_system/components/app_surface_card.dart';
+import 'package:ai_journal/app/design_system/components/collapsible_section.dart';
+import 'package:ai_journal/app/design_system/components/editor_toolbar_button.dart';
+import 'package:ai_journal/app/design_system/components/inline_notice.dart';
+import 'package:ai_journal/app/design_system/components/pill_chip.dart';
+import 'package:ai_journal/app/design_system/components/primary_action_button.dart';
+import 'package:ai_journal/app/design_system/components/section_header.dart';
+import 'package:ai_journal/app/design_system/tokens/spacing.dart';
 import 'package:ai_journal/app/providers.dart';
+import 'package:ai_journal/features/ai/presentation/widgets/ai_companion_sheet.dart';
 import 'package:ai_journal/features/journal/domain/models/journal_entry.dart';
+import 'package:ai_journal/features/journal/presentation/state/journal_editor_state.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -23,6 +35,12 @@ class JournalEditorPage extends ConsumerStatefulWidget {
   static const Key reflectionContinueButtonKey = ValueKey<String>(
     'journal_reflection_continue_button',
   );
+  static const Key reflectionRetryButtonKey = ValueKey<String>(
+    'journal_reflection_retry_button',
+  );
+  static const Key companionButtonKey = ValueKey<String>(
+    'journal_companion_button',
+  );
 
   @override
   ConsumerState<JournalEditorPage> createState() => _JournalEditorPageState();
@@ -32,6 +50,8 @@ class _JournalEditorPageState extends ConsumerState<JournalEditorPage> {
   final _titleController = TextEditingController();
   final _contentController = TextEditingController();
   final _tagsController = TextEditingController();
+
+  bool _savedInSession = false;
 
   @override
   void initState() {
@@ -71,15 +91,21 @@ class _JournalEditorPageState extends ConsumerState<JournalEditorPage> {
     final editorState = ref.watch(journalEditorControllerProvider);
     final words = _countWords(editorState.content);
     final characters = editorState.content.trim().length;
-    final isCompact = MediaQuery.sizeOf(context).width < 900;
+    final isCompact = MediaQuery.sizeOf(context).width < 920;
 
     return Scaffold(
       appBar: AppBar(
         title: Text(editorState.isEditing ? 'Edit Entry' : 'New Entry'),
         actions: [
+          IconButton(
+            key: JournalEditorPage.companionButtonKey,
+            tooltip: 'Open AI companion',
+            onPressed: _openCompanionSheet,
+            icon: const Icon(Icons.chat_bubble_outline),
+          ),
           TextButton(
-            onPressed: () => Navigator.of(context).maybePop(),
-            child: const Text('Close'),
+            onPressed: _closeEditor,
+            child: Text(_savedInSession ? 'Done' : 'Close'),
           ),
         ],
       ),
@@ -87,23 +113,49 @@ class _JournalEditorPageState extends ConsumerState<JournalEditorPage> {
         child: Align(
           alignment: Alignment.topCenter,
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 960),
+            constraints: const BoxConstraints(maxWidth: 980),
             child: Padding(
-              padding: const EdgeInsets.all(16),
+              padding: AppSpace.page,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   if (editorState.isSaving) const LinearProgressIndicator(),
-                  _EditorGuideCard(
+                  _EditorHeader(
                     isEditing: editorState.isEditing,
                     words: words,
                     characters: characters,
+                    onUsePrompt: _applyPromptStarter,
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: AppSpace.md),
+                  if (editorState.saveSucceeded) ...[
+                    const InlineNotice(
+                      tone: InlineNoticeTone.success,
+                      message:
+                          'Saved locally. You can continue editing or tap Done to return.',
+                    ),
+                    const SizedBox(height: AppSpace.sm),
+                  ],
+                  if (editorState.reflectionStatus != ReflectionStatus.idle ||
+                      editorState.hasReflection ||
+                      (editorState.reflectionErrorMessage != null &&
+                          editorState.reflectionErrorMessage!.isNotEmpty)) ...[
+                    _ReflectionSection(
+                      state: editorState,
+                      onRetry: () {
+                        unawaited(
+                          ref
+                              .read(journalEditorControllerProvider.notifier)
+                              .retryReflection(),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: AppSpace.sm),
+                  ],
                   TextField(
                     key: JournalEditorPage.titleFieldKey,
                     controller: _titleController,
                     textInputAction: TextInputAction.next,
+                    style: Theme.of(context).textTheme.titleLarge,
                     decoration: const InputDecoration(
                       labelText: 'Title',
                       hintText: 'Name this entry',
@@ -112,7 +164,7 @@ class _JournalEditorPageState extends ConsumerState<JournalEditorPage> {
                         .read(journalEditorControllerProvider.notifier)
                         .updateTitle,
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: AppSpace.sm),
                   _FormattingToolbar(
                     compact: isCompact,
                     onBold: () => _wrapSelection('**', '**'),
@@ -121,44 +173,95 @@ class _JournalEditorPageState extends ConsumerState<JournalEditorPage> {
                     onBullet: () => _insertAtSelection('\n- '),
                     onQuote: () => _insertAtSelection('\n> '),
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: AppSpace.sm),
                   Expanded(
-                    child: TextField(
-                      key: JournalEditorPage.contentFieldKey,
-                      controller: _contentController,
-                      maxLines: null,
-                      expands: true,
-                      textAlignVertical: TextAlignVertical.top,
-                      decoration: const InputDecoration(
-                        alignLabelWithHint: true,
-                        labelText: 'Write',
-                        hintText: 'Capture your thoughts with clarity...',
+                    child: AppSurfaceCard(
+                      padding: const EdgeInsets.all(0),
+                      child: TextField(
+                        key: JournalEditorPage.contentFieldKey,
+                        controller: _contentController,
+                        maxLines: null,
+                        expands: true,
+                        textAlignVertical: TextAlignVertical.top,
+                        style: Theme.of(context).textTheme.bodyLarge,
+                        decoration: const InputDecoration(
+                          alignLabelWithHint: true,
+                          labelText: 'Write',
+                          hintText: 'Capture the moment, what you felt, and what mattered.',
+                          border: InputBorder.none,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: InputBorder.none,
+                          filled: false,
+                          contentPadding: EdgeInsets.all(16),
+                        ),
+                        onChanged: ref
+                            .read(journalEditorControllerProvider.notifier)
+                            .updateContent,
                       ),
-                      onChanged: ref
-                          .read(journalEditorControllerProvider.notifier)
-                          .updateContent,
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    key: JournalEditorPage.tagsFieldKey,
-                    controller: _tagsController,
-                    decoration: const InputDecoration(
-                      labelText: 'Tags',
-                      hintText: 'wellness, work, gratitude',
+                  const SizedBox(height: AppSpace.sm),
+                  if (isCompact)
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        TextField(
+                          key: JournalEditorPage.tagsFieldKey,
+                          controller: _tagsController,
+                          decoration: const InputDecoration(
+                            labelText: 'Tags',
+                            hintText: 'wellness, work, gratitude',
+                          ),
+                          onChanged: ref
+                              .read(journalEditorControllerProvider.notifier)
+                              .updateTagsInput,
+                        ),
+                        const SizedBox(height: AppSpace.xs),
+                        Text(
+                          'AI suggestions are optional and supportive only.',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    )
+                  else
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            key: JournalEditorPage.tagsFieldKey,
+                            controller: _tagsController,
+                            decoration: const InputDecoration(
+                              labelText: 'Tags',
+                              hintText: 'wellness, work, gratitude',
+                            ),
+                            onChanged: ref
+                                .read(journalEditorControllerProvider.notifier)
+                                .updateTagsInput,
+                          ),
+                        ),
+                        const SizedBox(width: AppSpace.sm),
+                        const Expanded(
+                          child: InlineNotice(
+                            tone: InlineNoticeTone.info,
+                            message:
+                                'AI suggestions are optional. Supportive prompts only, not therapy or crisis care.',
+                          ),
+                        ),
+                      ],
                     ),
-                    onChanged: ref
-                        .read(journalEditorControllerProvider.notifier)
-                        .updateTagsInput,
-                  ),
-                  const SizedBox(height: 16),
-                  FilledButton.icon(
+                  const SizedBox(height: AppSpace.sm),
+                  PrimaryActionButton(
                     key: JournalEditorPage.saveButtonKey,
-                    onPressed: editorState.canSave ? _save : null,
-                    icon: const Icon(Icons.save_outlined),
-                    label: Text(
-                      editorState.isEditing ? 'Update Entry' : 'Save Entry',
-                    ),
+                    onPressed: editorState.saveSucceeded
+                        ? _closeEditor
+                        : (editorState.canSave ? _save : null),
+                    icon: editorState.saveSucceeded
+                        ? Icons.check
+                        : Icons.save_outlined,
+                    label: editorState.saveSucceeded
+                        ? 'Done'
+                        : (editorState.isEditing ? 'Save Changes' : 'Save Entry'),
                   ),
                 ],
               ),
@@ -167,6 +270,31 @@ class _JournalEditorPageState extends ConsumerState<JournalEditorPage> {
         ),
       ),
     );
+  }
+
+  void _closeEditor() {
+    Navigator.of(context).pop(_savedInSession ? true : null);
+  }
+
+  Future<void> _openCompanionSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: false,
+      builder: (_) => const AICompanionSheet(),
+    );
+  }
+
+  void _applyPromptStarter(String starter) {
+    if (_contentController.text.trim().isEmpty) {
+      _contentController.text = '$starter\n\n';
+    } else {
+      _contentController.text = '${_contentController.text.trim()}\n\n$starter\n';
+    }
+    _contentController.selection = TextSelection.collapsed(
+      offset: _contentController.text.length,
+    );
+    _notifyContentChanged();
   }
 
   void _wrapSelection(String prefix, String suffix) {
@@ -240,49 +368,185 @@ class _JournalEditorPageState extends ConsumerState<JournalEditorPage> {
   }
 
   Future<void> _save() async {
-    final saved = await ref
-        .read(journalEditorControllerProvider.notifier)
-        .save();
+    final saved = await ref.read(journalEditorControllerProvider.notifier).save();
     if (!mounted) {
       return;
     }
 
     if (saved) {
-      final reflection = ref.read(journalEditorControllerProvider).aiReflection;
-      if (reflection != null && reflection.isNotEmpty) {
-        await showDialog<void>(
-          context: context,
-          builder: (_) {
-            return AlertDialog(
-              key: JournalEditorPage.reflectionDialogKey,
-              title: const Text('AI Reflection'),
-              content: SingleChildScrollView(child: Text(reflection)),
-              actions: [
-                FilledButton(
-                  key: JournalEditorPage.reflectionContinueButtonKey,
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Continue'),
-                ),
-              ],
-            );
-          },
-        );
-      }
-
-      if (!mounted) {
-        return;
-      }
-
-      Navigator.of(context).pop(true);
+      setState(() {
+        _savedInSession = true;
+      });
+      _showSnackBar(const SnackBar(content: Text('Entry saved locally')));
       return;
     }
 
     final message = ref.read(journalEditorControllerProvider).errorMessage;
     if (message != null && message.isNotEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(message)));
+      _showSnackBar(SnackBar(content: Text(message)));
     }
+  }
+
+  void _showSnackBar(SnackBar snackBar) {
+    final messenger = ScaffoldMessenger.of(context);
+    final mediaQuery = MediaQuery.of(context);
+    final bottomOffset =
+        AppSpace.xl +
+        kBottomNavigationBarHeight +
+        mediaQuery.padding.bottom +
+        mediaQuery.viewInsets.bottom;
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: snackBar.content,
+          duration: snackBar.duration,
+          action: snackBar.action,
+          behavior: SnackBarBehavior.floating,
+            margin: EdgeInsets.fromLTRB(
+            AppSpace.lg,
+            0,
+            AppSpace.lg,
+            bottomOffset,
+          ),
+        ),
+      );
+  }
+}
+
+class _EditorHeader extends StatelessWidget {
+  const _EditorHeader({
+    required this.isEditing,
+    required this.words,
+    required this.characters,
+    required this.onUsePrompt,
+  });
+
+  final bool isEditing;
+  final int words;
+  final int characters;
+  final ValueChanged<String> onUsePrompt;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppSurfaceCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SectionHeader(
+            title: isEditing ? 'Refine your entry' : 'Write without friction',
+            subtitle: isEditing
+                ? 'Focus on what changed, what you felt, and what you learned.'
+                : 'Start with one concrete moment. AI stays in the background.',
+            trailing: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text('$words words', style: Theme.of(context).textTheme.labelLarge),
+                Text(
+                  '$characters chars',
+                  style: Theme.of(context).textTheme.labelSmall,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                PillChip(
+                  label: 'What happened first?',
+                  icon: Icons.play_arrow_outlined,
+                  onTap: () =>
+                      onUsePrompt('What happened first, and what stood out?'),
+                ),
+                const SizedBox(width: 8),
+                PillChip(
+                  label: 'What did I feel?',
+                  icon: Icons.favorite_border,
+                  onTap: () => onUsePrompt(
+                    'What emotions did I notice in that moment?',
+                  ),
+                ),
+                const SizedBox(width: 8),
+                PillChip(
+                  label: 'What next?',
+                  icon: Icons.arrow_forward_outlined,
+                  onTap: () =>
+                      onUsePrompt('What is one next step I want to try?'),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReflectionSection extends StatelessWidget {
+  const _ReflectionSection({required this.state, required this.onRetry});
+
+  final JournalEditorState state;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget body;
+    switch (state.reflectionStatus) {
+      case ReflectionStatus.loading:
+        body = const InlineNotice(
+          tone: InlineNoticeTone.info,
+          icon: Icons.auto_awesome,
+          message: 'Generating a short reflection... You can keep editing or tap Done anytime.',
+        );
+      case ReflectionStatus.success:
+        body = SelectableText(
+          state.reflectionText ?? '',
+          style: Theme.of(context).textTheme.bodyMedium,
+        );
+      case ReflectionStatus.error:
+        body = Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            InlineNotice(
+              tone: InlineNoticeTone.error,
+              message: state.reflectionErrorMessage ??
+                  'Unable to generate AI reflection right now.',
+            ),
+            if (state.canRetryReflection) ...[
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  key: JournalEditorPage.reflectionRetryButtonKey,
+                  onPressed: onRetry,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Retry reflection'),
+                ),
+              ),
+            ],
+          ],
+        );
+      case ReflectionStatus.idle:
+        body = const SizedBox.shrink();
+    }
+
+    return CollapsibleSection(
+      key: JournalEditorPage.reflectionDialogKey,
+      title: 'AI Reflection',
+      subtitle: 'Optional post-save perspective, kept concise.',
+      leading: const Icon(Icons.auto_awesome_outlined, size: 18),
+      initiallyExpanded: true,
+      trailing: state.reflectionStatus == ReflectionStatus.loading
+          ? const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : null,
+      child: body,
+    );
   }
 }
 
@@ -305,109 +569,59 @@ class _FormattingToolbar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final buttons = [
-      OutlinedButton(
+    final buttons = <Widget>[
+      EditorToolbarButton(
         key: JournalEditorPage.boldButtonKey,
+        icon: Icons.format_bold,
+        tooltip: 'Bold',
+        label: 'Bold',
         onPressed: onBold,
-        child: const Text('Bold'),
       ),
-      OutlinedButton(
+      EditorToolbarButton(
         key: JournalEditorPage.italicButtonKey,
+        icon: Icons.format_italic,
+        tooltip: 'Italic',
+        label: 'Italic',
         onPressed: onItalic,
-        child: const Text('Italic'),
       ),
-      OutlinedButton(
+      EditorToolbarButton(
         key: JournalEditorPage.headingButtonKey,
+        icon: Icons.title,
+        tooltip: 'Heading',
+        label: 'H2',
         onPressed: onHeading,
-        child: const Text('H2'),
       ),
-      OutlinedButton(
+      EditorToolbarButton(
         key: JournalEditorPage.bulletButtonKey,
+        icon: Icons.format_list_bulleted,
+        tooltip: 'Bullet list',
+        label: 'Bullet',
         onPressed: onBullet,
-        child: const Text('Bullet'),
       ),
-      OutlinedButton(
+      EditorToolbarButton(
         key: JournalEditorPage.quoteButtonKey,
+        icon: Icons.format_quote,
+        tooltip: 'Quote',
+        label: 'Quote',
         onPressed: onQuote,
-        child: const Text('Quote'),
       ),
     ];
 
-    if (compact) {
-      final compactChildren = <Widget>[];
-      for (var i = 0; i < buttons.length; i++) {
-        compactChildren.add(buttons[i]);
-        if (i != buttons.length - 1) {
-          compactChildren.add(const SizedBox(width: 8));
-        }
-      }
-
-      return SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(children: compactChildren),
-      );
-    }
-
-    return Wrap(spacing: 8, runSpacing: 8, children: buttons);
-  }
-}
-
-class _EditorGuideCard extends StatelessWidget {
-  const _EditorGuideCard({
-    required this.isEditing,
-    required this.words,
-    required this.characters,
-  });
-
-  final bool isEditing;
-  final int words;
-  final int characters;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        gradient: LinearGradient(
-          colors: [colorScheme.primaryContainer, colorScheme.tertiaryContainer],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            isEditing ? Icons.edit_note : Icons.auto_stories,
-            color: colorScheme.onPrimaryContainer,
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              isEditing
-                  ? 'Refine your reflection with specific details and outcomes.'
-                  : 'Start with one concrete moment, then add what you felt and learned.',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                '$words words',
-                style: Theme.of(context).textTheme.labelLarge,
+    return AppSurfaceCard(
+      padding: const EdgeInsets.all(10),
+      child: compact
+          ? SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (var i = 0; i < buttons.length; i++) ...[
+                    buttons[i],
+                    if (i != buttons.length - 1) const SizedBox(width: 8),
+                  ],
+                ],
               ),
-              Text(
-                '$characters chars',
-                style: Theme.of(context).textTheme.labelSmall,
-              ),
-            ],
-          ),
-        ],
-      ),
+            )
+          : Wrap(spacing: 8, runSpacing: 8, children: buttons),
     );
   }
 }

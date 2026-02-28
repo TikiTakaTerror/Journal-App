@@ -1,6 +1,15 @@
 import 'dart:async';
 
+import 'package:ai_journal/app/design_system/components/app_surface_card.dart';
+import 'package:ai_journal/app/design_system/components/empty_state_panel.dart';
+import 'package:ai_journal/app/design_system/components/inline_notice.dart';
+import 'package:ai_journal/app/design_system/components/journal_entry_card.dart';
+import 'package:ai_journal/app/design_system/components/pill_chip.dart';
+import 'package:ai_journal/app/design_system/components/section_header.dart';
+import 'package:ai_journal/app/design_system/tokens/spacing.dart';
 import 'package:ai_journal/app/providers.dart';
+import 'package:ai_journal/features/ai/presentation/state/smart_prompt_state.dart';
+import 'package:ai_journal/features/ai/presentation/widgets/ai_companion_sheet.dart';
 import 'package:ai_journal/features/journal/domain/models/journal_entry.dart';
 import 'package:ai_journal/features/journal/presentation/pages/journal_detail_page.dart';
 import 'package:flutter/material.dart';
@@ -36,34 +45,32 @@ class _JournalHomePageState extends ConsumerState<JournalHomePage> {
   Widget build(BuildContext context) {
     final entriesAsync = ref.watch(journalEntriesProvider);
     final promptState = ref.watch(smartPromptControllerProvider);
-    final isCompact = MediaQuery.sizeOf(context).width < 820;
+    final isCompact = MediaQuery.sizeOf(context).width < 860;
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final maxTopSectionHeight = isCompact
-            ? constraints.maxHeight * 0.58
-            : constraints.maxHeight * 0.5;
+        final topMaxHeight = constraints.maxHeight * (isCompact ? 0.62 : 0.52);
 
         return Padding(
-          padding: const EdgeInsets.all(16),
+          padding: AppSpace.page,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               ConstrainedBox(
-                constraints: BoxConstraints(maxHeight: maxTopSectionHeight),
+                constraints: BoxConstraints(maxHeight: topMaxHeight),
                 child: SingleChildScrollView(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      _HeaderCard(
+                      _TodayHeaderCard(
+                        promptState: promptState,
                         onQuickTag: _applyQuickTag,
-                        promptText: promptState.prompt,
-                        promptError: promptState.errorMessage,
-                        promptLoading: promptState.isLoading,
                         onGeneratePrompt: _generateSmartPrompt,
+                        onRetryPrompt: _retrySmartPrompt,
+                        onOpenCompanion: _openCompanionSheet,
                       ),
-                      const SizedBox(height: 16),
-                      _FilterPanel(
+                      const SizedBox(height: AppSpace.md),
+                      _FilterBar(
                         isCompact: isCompact,
                         searchController: _searchController,
                         tagController: _tagController,
@@ -81,30 +88,30 @@ class _JournalHomePageState extends ConsumerState<JournalHomePage> {
                   ),
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: AppSpace.md),
               Expanded(
                 child: entriesAsync.when(
-                  loading: () =>
-                      const Center(child: CircularProgressIndicator()),
-                  error: (_, _) => const _ErrorState(),
+                  loading: () => const Center(child: CircularProgressIndicator()),
+                  error: (_, _) => const _EntriesLoadErrorState(),
                   data: (entries) {
                     if (entries.isEmpty) {
-                      return const _EmptyState();
+                      return const _EmptyJournalState();
                     }
 
                     return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         _EntriesSummary(entriesCount: entries.length),
-                        const SizedBox(height: 10),
+                        const SizedBox(height: AppSpace.sm),
                         Expanded(
                           child: ListView.separated(
                             key: JournalHomePage.entriesListKey,
                             itemCount: entries.length,
                             separatorBuilder: (_, _) =>
-                                const SizedBox(height: 8),
+                                const SizedBox(height: AppSpace.sm),
                             itemBuilder: (context, index) {
                               final entry = entries[index];
-                              return _EntryCard(
+                              return JournalEntryCard(
                                 entry: entry,
                                 onTap: () => _openEntryDetail(entry),
                               );
@@ -185,10 +192,82 @@ class _JournalHomePageState extends ConsumerState<JournalHomePage> {
   Future<void> _generateSmartPrompt() async {
     await ref.read(smartPromptControllerProvider.notifier).generatePrompt();
   }
+
+  Future<void> _retrySmartPrompt() async {
+    await ref.read(smartPromptControllerProvider.notifier).retryLastPrompt();
+  }
+
+  Future<void> _openCompanionSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: false,
+      builder: (_) => const AICompanionSheet(),
+    );
+  }
 }
 
-class _FilterPanel extends StatelessWidget {
-  const _FilterPanel({
+class _TodayHeaderCard extends StatelessWidget {
+  const _TodayHeaderCard({
+    required this.promptState,
+    required this.onQuickTag,
+    required this.onGeneratePrompt,
+    required this.onRetryPrompt,
+    required this.onOpenCompanion,
+  });
+
+  final SmartPromptState promptState;
+  final ValueChanged<String> onQuickTag;
+  final Future<void> Function() onGeneratePrompt;
+  final Future<void> Function() onRetryPrompt;
+  final Future<void> Function() onOpenCompanion;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return AppSurfaceCard(
+      tint: Color.alphaBlend(
+        scheme.primary.withValues(alpha: 0.03),
+        scheme.surface,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SectionHeader(
+            title: 'Today',
+            subtitle: 'Write first. Use AI only when it helps you move.',
+            trailing: FilledButton.tonalIcon(
+              onPressed: () {
+                unawaited(onOpenCompanion());
+              },
+              icon: const Icon(Icons.chat_bubble_outline, size: 18),
+              label: const Text('Companion'),
+            ),
+          ),
+          const SizedBox(height: AppSpace.sm),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _QuickTagChip(label: 'wellness', onTap: onQuickTag),
+              _QuickTagChip(label: 'work', onTap: onQuickTag),
+              _QuickTagChip(label: 'gratitude', onTap: onQuickTag),
+            ],
+          ),
+          const SizedBox(height: AppSpace.sm),
+          _SmartPromptPanel(
+            promptState: promptState,
+            onGeneratePrompt: onGeneratePrompt,
+            onRetryPrompt: onRetryPrompt,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FilterBar extends StatelessWidget {
+  const _FilterBar({
     required this.isCompact,
     required this.searchController,
     required this.tagController,
@@ -223,7 +302,7 @@ class _FilterPanel extends StatelessWidget {
       decoration: const InputDecoration(
         labelText: 'Tag filter',
         hintText: 'wellness',
-        prefixIcon: Icon(Icons.tag),
+        prefixIcon: Icon(Icons.local_offer_outlined),
       ),
       onChanged: onTagChanged,
     );
@@ -234,26 +313,27 @@ class _FilterPanel extends StatelessWidget {
       label: const Text('Reset'),
     );
 
-    if (isCompact) {
-      return Column(
-        children: [
-          searchField,
-          const SizedBox(height: 10),
-          tagField,
-          const SizedBox(height: 10),
-          Align(alignment: Alignment.centerRight, child: resetButton),
-        ],
-      );
-    }
-
-    return Row(
-      children: [
-        Expanded(flex: 3, child: searchField),
-        const SizedBox(width: 10),
-        Expanded(flex: 2, child: tagField),
-        const SizedBox(width: 10),
-        resetButton,
-      ],
+    return AppSurfaceCard(
+      padding: const EdgeInsets.all(12),
+      child: isCompact
+          ? Column(
+              children: [
+                searchField,
+                const SizedBox(height: 10),
+                tagField,
+                const SizedBox(height: 10),
+                Align(alignment: Alignment.centerRight, child: resetButton),
+              ],
+            )
+          : Row(
+              children: [
+                Expanded(flex: 3, child: searchField),
+                const SizedBox(width: 10),
+                Expanded(flex: 2, child: tagField),
+                const SizedBox(width: 10),
+                resetButton,
+              ],
+            ),
     );
   }
 }
@@ -265,103 +345,40 @@ class _EntriesSummary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Text(
-        '$entriesCount entries',
-        style: Theme.of(context).textTheme.labelLarge,
-      ),
-    );
-  }
-}
-
-class _HeaderCard extends StatelessWidget {
-  const _HeaderCard({
-    required this.onQuickTag,
-    required this.promptText,
-    required this.promptError,
-    required this.promptLoading,
-    required this.onGeneratePrompt,
-  });
-
-  final ValueChanged<String> onQuickTag;
-  final String? promptText;
-  final String? promptError;
-  final bool promptLoading;
-  final Future<void> Function() onGeneratePrompt;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        gradient: LinearGradient(
-          colors: [colorScheme.primaryContainer, colorScheme.tertiaryContainer],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+    return Row(
+      children: [
+        Text('$entriesCount entries', style: Theme.of(context).textTheme.labelLarge),
+        const SizedBox(width: 8),
+        Text(
+          'Local-first journal archive',
+          style: Theme.of(context).textTheme.bodySmall,
         ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Capture today while it is fresh',
-            style: Theme.of(context).textTheme.titleLarge,
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'Tap an entry to open details, edit, or delete with undo support.',
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _QuickTagChip(label: 'wellness', onTap: onQuickTag),
-              _QuickTagChip(label: 'work', onTap: onQuickTag),
-              _QuickTagChip(label: 'gratitude', onTap: onQuickTag),
-            ],
-          ),
-          const SizedBox(height: 12),
-          _SmartPromptPanel(
-            promptText: promptText,
-            promptError: promptError,
-            promptLoading: promptLoading,
-            onGeneratePrompt: onGeneratePrompt,
-          ),
-        ],
-      ),
+      ],
     );
   }
 }
 
 class _SmartPromptPanel extends StatelessWidget {
   const _SmartPromptPanel({
-    required this.promptText,
-    required this.promptError,
-    required this.promptLoading,
+    required this.promptState,
     required this.onGeneratePrompt,
+    required this.onRetryPrompt,
   });
 
-  final String? promptText;
-  final String? promptError;
-  final bool promptLoading;
+  final SmartPromptState promptState;
   final Future<void> Function() onGeneratePrompt;
+  final Future<void> Function() onRetryPrompt;
 
   @override
   Widget build(BuildContext context) {
-    final hasPrompt = promptText != null && promptText!.trim().isNotEmpty;
-    final colorScheme = Theme.of(context).colorScheme;
+    final hasPrompt = promptState.displayPrompt != null &&
+        promptState.displayPrompt!.trim().isNotEmpty;
+    final promptText = promptState.displayPrompt ??
+        'Generate a focused prompt based on recent themes in your journal.';
 
-    return Container(
+    return AppSurfaceCard(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        color: colorScheme.surface.withValues(alpha: 0.55),
-      ),
+      tint: Theme.of(context).colorScheme.surface.withValues(alpha: 0.7),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -371,43 +388,54 @@ class _SmartPromptPanel extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Smart Journaling Prompt',
+                  'Prompt Companion',
                   style: Theme.of(context).textTheme.titleSmall,
                 ),
               ),
               FilledButton.tonalIcon(
                 key: JournalHomePage.generatePromptButtonKey,
-                onPressed: promptLoading
+                onPressed: promptState.isLoading
                     ? null
                     : () {
                         unawaited(onGeneratePrompt());
                       },
-                icon: promptLoading
+                icon: promptState.isLoading
                     ? const SizedBox(
                         width: 14,
                         height: 14,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.bolt),
-                label: const Text('Generate'),
+                label: Text(hasPrompt ? 'Refresh' : 'Generate'),
               ),
             ],
           ),
           const SizedBox(height: 8),
           Text(
             key: JournalHomePage.promptTextKey,
-            hasPrompt
-                ? promptText!
-                : 'Generate a focused prompt based on recent themes in your journal.',
+            promptText,
             style: Theme.of(context).textTheme.bodyMedium,
           ),
-          if (promptError != null && promptError!.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Text(
-              promptError!,
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: colorScheme.error),
+          if (promptState.errorMessage != null && promptState.errorMessage!.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            InlineNotice(
+              tone: InlineNoticeTone.error,
+              message: promptState.errorMessage!,
+              action: promptState.retryable
+                  ? TextButton(
+                      onPressed: () {
+                        unawaited(onRetryPrompt());
+                      },
+                      child: const Text('Retry'),
+                    )
+                  : null,
+            ),
+          ] else if (promptState.isLoading && hasPrompt) ...[
+            const SizedBox(height: 8),
+            const InlineNotice(
+              tone: InlineNoticeTone.info,
+              message: 'Refreshing prompt while keeping your last suggestion visible.',
+              icon: Icons.hourglass_empty,
             ),
           ],
         ],
@@ -424,95 +452,16 @@ class _QuickTagChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ActionChip(
-      label: Text('#$label'),
-      avatar: const Icon(Icons.local_offer_outlined, size: 16),
-      onPressed: () => onTap(label),
+    return PillChip(
+      label: '#$label',
+      icon: Icons.local_offer_outlined,
+      onTap: () => onTap(label),
     );
   }
 }
 
-class _EntryCard extends StatelessWidget {
-  const _EntryCard({required this.entry, required this.onTap});
-
-  final JournalEntry entry;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      clipBehavior: Clip.hardEdge,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 34,
-                    height: 34,
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primaryContainer,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Icon(
-                      Icons.menu_book_rounded,
-                      size: 18,
-                      color: Theme.of(context).colorScheme.onPrimaryContainer,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      entry.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                  ),
-                  Text(
-                    _formatDate(entry.updatedAt),
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Text(entry.content, maxLines: 2, overflow: TextOverflow.ellipsis),
-              if (entry.tags.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: entry.tags
-                      .map(
-                        (tag) => Chip(
-                          visualDensity: VisualDensity.compact,
-                          label: Text(tag),
-                        ),
-                      )
-                      .toList(growable: false),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  String _formatDate(DateTime value) {
-    final local = value.toLocal();
-    final month = local.month.toString().padLeft(2, '0');
-    final day = local.day.toString().padLeft(2, '0');
-    return '${local.year}-$month-$day';
-  }
-}
-
-class _EmptyState extends StatelessWidget {
-  const _EmptyState();
+class _EmptyJournalState extends StatelessWidget {
+  const _EmptyJournalState();
 
   @override
   Widget build(BuildContext context) {
@@ -522,25 +471,14 @@ class _EmptyState extends StatelessWidget {
           child: ConstrainedBox(
             constraints: BoxConstraints(minHeight: constraints.maxHeight),
             child: Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.edit_note,
-                    size: 56,
-                    color: Theme.of(context).colorScheme.primary,
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    'No journal entries yet.',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Press “New Entry” to start writing.',
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                ],
+              child: SizedBox(
+                width: 420,
+                child: const EmptyStatePanel(
+                  icon: Icons.edit_note,
+                  title: 'No journal entries yet.',
+                  message:
+                      'Press “New Entry” to start writing. AI stays optional and your entries stay local-first.',
+                ),
               ),
             ),
           ),
@@ -550,15 +488,19 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-class _ErrorState extends StatelessWidget {
-  const _ErrorState();
+class _EntriesLoadErrorState extends StatelessWidget {
+  const _EntriesLoadErrorState();
 
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Text(
-        'Unable to load entries right now.',
-        style: Theme.of(context).textTheme.bodyMedium,
+      child: SizedBox(
+        width: 420,
+        child: const EmptyStatePanel(
+          icon: Icons.inbox_outlined,
+          title: 'Unable to load entries right now.',
+          message: 'Try again in a moment. Your local data has not been changed.',
+        ),
       ),
     );
   }

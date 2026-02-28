@@ -1,3 +1,5 @@
+enum ReflectionStatus { idle, loading, success, error }
+
 class JournalEditorState {
   const JournalEditorState({
     this.title = '',
@@ -5,7 +7,12 @@ class JournalEditorState {
     this.tagsInput = '',
     this.isSaving = false,
     this.errorMessage,
-    this.aiReflection,
+    this.reflectionStatus = ReflectionStatus.idle,
+    this.reflectionText,
+    this.reflectionErrorMessage,
+    this.reflectionErrorCode,
+    this.reflectionRetryable = false,
+    this.saveSucceeded = false,
     this.editingEntryId,
     this.editingCreatedAt,
   });
@@ -15,13 +22,25 @@ class JournalEditorState {
   final String tagsInput;
   final bool isSaving;
   final String? errorMessage;
-  final String? aiReflection;
+  final ReflectionStatus reflectionStatus;
+  final String? reflectionText;
+  final String? reflectionErrorMessage;
+  final String? reflectionErrorCode;
+  final bool reflectionRetryable;
+  final bool saveSucceeded;
   final String? editingEntryId;
   final DateTime? editingCreatedAt;
+
+  @Deprecated('Use reflectionText')
+  String? get aiReflection => reflectionText;
 
   bool get canSave =>
       title.trim().isNotEmpty && content.trim().isNotEmpty && !isSaving;
   bool get isEditing => editingEntryId != null && editingCreatedAt != null;
+  bool get canRetryReflection =>
+      reflectionStatus == ReflectionStatus.error && reflectionRetryable;
+  bool get hasReflection =>
+      reflectionText != null && reflectionText!.trim().isNotEmpty;
 
   JournalEditorState copyWith({
     String? title,
@@ -30,8 +49,15 @@ class JournalEditorState {
     bool? isSaving,
     String? errorMessage,
     bool clearErrorMessage = false,
-    String? aiReflection,
-    bool clearAiReflection = false,
+    ReflectionStatus? reflectionStatus,
+    String? reflectionText,
+    bool clearReflectionText = false,
+    String? reflectionErrorMessage,
+    bool clearReflectionErrorMessage = false,
+    String? reflectionErrorCode,
+    bool clearReflectionErrorCode = false,
+    bool? reflectionRetryable,
+    bool? saveSucceeded,
     String? editingEntryId,
     DateTime? editingCreatedAt,
     bool clearEditing = false,
@@ -44,9 +70,18 @@ class JournalEditorState {
       errorMessage: clearErrorMessage
           ? null
           : (errorMessage ?? this.errorMessage),
-      aiReflection: clearAiReflection
+      reflectionStatus: reflectionStatus ?? this.reflectionStatus,
+      reflectionText: clearReflectionText
           ? null
-          : (aiReflection ?? this.aiReflection),
+          : (reflectionText ?? this.reflectionText),
+      reflectionErrorMessage: clearReflectionErrorMessage
+          ? null
+          : (reflectionErrorMessage ?? this.reflectionErrorMessage),
+      reflectionErrorCode: clearReflectionErrorCode
+          ? null
+          : (reflectionErrorCode ?? this.reflectionErrorCode),
+      reflectionRetryable: reflectionRetryable ?? this.reflectionRetryable,
+      saveSucceeded: saveSucceeded ?? this.saveSucceeded,
       editingEntryId: clearEditing
           ? null
           : (editingEntryId ?? this.editingEntryId),

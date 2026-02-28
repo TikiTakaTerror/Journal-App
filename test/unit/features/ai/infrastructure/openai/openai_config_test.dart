@@ -22,6 +22,10 @@ void main() {
       expect(config.baseUrl, isNotEmpty);
       expect(config.chatModel, isNotEmpty);
       expect(config.embeddingModel, isNotEmpty);
+      expect(config.apiMode, OpenAIApiMode.responses);
+      expect(config.maxRetries, greaterThanOrEqualTo(0));
+      expect(config.requestTimeoutMs, greaterThan(0));
+      expect(config.debugLoggingEnabled, isFalse);
     });
   });
 }

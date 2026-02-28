@@ -1,14 +1,17 @@
+import 'dart:async';
+
 import 'package:ai_journal/features/ai/domain/contracts/ai_orchestrator.dart';
 import 'package:ai_journal/features/ai/domain/models/ai_requests.dart';
 import 'package:ai_journal/features/ai/domain/models/ai_responses.dart';
 import 'package:ai_journal/features/journal/domain/models/journal_entry.dart';
 import 'package:ai_journal/features/journal/domain/repositories/journal_repository.dart';
 import 'package:ai_journal/features/journal/presentation/state/journal_editor_controller.dart';
+import 'package:ai_journal/features/journal/presentation/state/journal_editor_state.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('JournalEditorController', () {
-    test('save creates a new entry when not editing', () async {
+    test('save creates a new entry and marks save success when AI is unavailable', () async {
       final repository = _FakeJournalRepository();
       final controller = JournalEditorController(
         repository: repository,
@@ -27,16 +30,15 @@ void main() {
       expect(repository.savedEntries, hasLength(1));
       expect(repository.savedEntries.single.id, 'generated-id');
       expect(repository.savedEntries.single.tags, const ['work', 'focus']);
-      expect(controller.state.title, isEmpty);
-      expect(controller.state.isEditing, isFalse);
+      expect(controller.state.saveSucceeded, isTrue);
+      expect(controller.state.title, 'New title');
+      expect(controller.state.isEditing, isTrue);
+      expect(controller.state.reflectionStatus, ReflectionStatus.idle);
     });
 
-    test('save generates reflection when AI orchestrator is available', () async {
+    test('save returns before reflection completes and updates reflection later', () async {
       final repository = _FakeJournalRepository();
-      final orchestrator = _FakeAIOrchestrator(
-        reflection:
-            'You handled a difficult moment with a concrete self-regulation action.',
-      );
+      final orchestrator = _CompletingAIOrchestrator();
       final controller = JournalEditorController(
         repository: repository,
         idGenerator: () => 'generated-id',
@@ -52,13 +54,24 @@ void main() {
       final saved = await controller.save();
 
       expect(saved, isTrue);
-      expect(controller.state.aiReflection, orchestrator.reflection);
+      expect(controller.state.saveSucceeded, isTrue);
+      expect(controller.state.reflectionStatus, ReflectionStatus.loading);
+      expect(controller.state.reflectionText, isNull);
       expect(orchestrator.reflectionRequests, hasLength(1));
-      expect(orchestrator.reflectionRequests.single.entry.id, 'generated-id');
-      expect(orchestrator.reflectionRequests.single.entry.title, 'New title');
+
+      orchestrator.completeReflection(
+        'You handled a difficult moment with a concrete self-regulation action.',
+      );
+      await _flushAsync();
+
+      expect(controller.state.reflectionStatus, ReflectionStatus.success);
+      expect(
+        controller.state.reflectionText,
+        'You handled a difficult moment with a concrete self-regulation action.',
+      );
     });
 
-    test('save succeeds when reflection generation fails', () async {
+    test('save succeeds when reflection generation fails and exposes retryable error', () async {
       final repository = _FakeJournalRepository();
       final controller = JournalEditorController(
         repository: repository,
@@ -72,11 +85,41 @@ void main() {
         ..updateContent('New content');
 
       final saved = await controller.save();
+      await _flushAsync();
 
       expect(saved, isTrue);
       expect(repository.savedEntries, hasLength(1));
-      expect(controller.state.aiReflection, isNull);
-      expect(controller.state.errorMessage, isNull);
+      expect(controller.state.saveSucceeded, isTrue);
+      expect(controller.state.reflectionStatus, ReflectionStatus.error);
+      expect(controller.state.reflectionText, isNull);
+      expect(controller.state.reflectionErrorMessage, isNotNull);
+      expect(controller.state.reflectionRetryable, isTrue);
+    });
+
+    test('retryReflection retries after a reflection failure', () async {
+      final repository = _FakeJournalRepository();
+      final orchestrator = _ToggleFailingAIOrchestrator();
+      final controller = JournalEditorController(
+        repository: repository,
+        idGenerator: () => 'generated-id',
+        now: () => DateTime.utc(2026, 2, 16, 12),
+        aiOrchestrator: orchestrator,
+      );
+
+      controller
+        ..updateTitle('New title')
+        ..updateContent('New content');
+
+      await controller.save();
+      await _flushAsync();
+      expect(controller.state.reflectionStatus, ReflectionStatus.error);
+
+      orchestrator.shouldFail = false;
+      await controller.retryReflection();
+      await _flushAsync();
+
+      expect(controller.state.reflectionStatus, ReflectionStatus.success);
+      expect(controller.state.reflectionText, 'Recovered reflection');
     });
 
     test(
@@ -140,8 +183,14 @@ void main() {
       expect(controller.state.title, isEmpty);
       expect(controller.state.content, isEmpty);
       expect(controller.state.tagsInput, isEmpty);
+      expect(controller.state.reflectionStatus, ReflectionStatus.idle);
     });
   });
+}
+
+Future<void> _flushAsync() async {
+  await Future<void>.delayed(Duration.zero);
+  await Future<void>.delayed(Duration.zero);
 }
 
 class _FakeJournalRepository implements JournalRepository {
@@ -181,11 +230,9 @@ class _FakeJournalRepository implements JournalRepository {
   }
 }
 
-class _FakeAIOrchestrator implements AIOrchestrator {
-  _FakeAIOrchestrator({required this.reflection});
-
-  final String reflection;
+class _CompletingAIOrchestrator implements AIOrchestrator {
   final List<AIReflectionRequest> reflectionRequests = <AIReflectionRequest>[];
+  Completer<String>? _completer;
 
   @override
   Future<AIChatResponse> chatWithMemory(AIChatRequest request) async {
@@ -198,9 +245,36 @@ class _FakeAIOrchestrator implements AIOrchestrator {
   }
 
   @override
-  Future<String> reflectOnEntry(AIReflectionRequest request) async {
+  Future<String> reflectOnEntry(AIReflectionRequest request) {
     reflectionRequests.add(request);
-    return reflection;
+    _completer = Completer<String>();
+    return _completer!.future;
+  }
+
+  void completeReflection(String value) {
+    _completer?.complete(value);
+  }
+}
+
+class _ToggleFailingAIOrchestrator implements AIOrchestrator {
+  bool shouldFail = true;
+
+  @override
+  Future<AIChatResponse> chatWithMemory(AIChatRequest request) async {
+    throw Exception('not used');
+  }
+
+  @override
+  Future<String> generatePrompt(AISmartPromptRequest request) async {
+    throw Exception('not used');
+  }
+
+  @override
+  Future<String> reflectOnEntry(AIReflectionRequest request) async {
+    if (shouldFail) {
+      throw Exception('reflection failed');
+    }
+    return 'Recovered reflection';
   }
 }
 

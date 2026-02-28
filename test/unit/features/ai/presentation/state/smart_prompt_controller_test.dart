@@ -2,6 +2,7 @@ import 'package:ai_journal/features/ai/domain/contracts/ai_orchestrator.dart';
 import 'package:ai_journal/features/ai/domain/models/ai_requests.dart';
 import 'package:ai_journal/features/ai/domain/models/ai_responses.dart';
 import 'package:ai_journal/features/ai/presentation/state/smart_prompt_controller.dart';
+import 'package:ai_journal/features/ai/presentation/state/smart_prompt_state.dart';
 import 'package:ai_journal/features/journal/domain/models/journal_entry.dart';
 import 'package:ai_journal/features/journal/domain/repositories/journal_repository.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -35,6 +36,7 @@ void main() {
         final controller = SmartPromptController(
           repository: repository,
           aiOrchestrator: orchestrator,
+          now: () => DateTime.utc(2026, 2, 26, 11),
         );
 
         await controller.generatePrompt();
@@ -43,7 +45,10 @@ void main() {
           controller.state.prompt,
           'What is one small action that would make tomorrow calmer?',
         );
+        expect(controller.state.status, SmartPromptStatus.success);
         expect(controller.state.errorMessage, isNull);
+        expect(controller.state.retryable, isFalse);
+        expect(controller.state.lastUpdatedAt, DateTime.utc(2026, 2, 26, 11));
         expect(orchestrator.promptRequests, hasLength(1));
         expect(orchestrator.promptRequests.single.recentThemes, const <String>[
           'work',
@@ -62,23 +67,41 @@ void main() {
       await controller.generatePrompt();
 
       expect(controller.state.prompt, isNull);
-      expect(controller.state.errorMessage, isNotNull);
+      expect(controller.state.status, SmartPromptStatus.error);
+      expect(controller.state.errorCode, 'ai_unavailable');
+      expect(controller.state.retryable, isFalse);
       expect(controller.state.errorMessage, contains('Enable cloud AI'));
     });
 
-    test('generatePrompt fails gracefully when orchestrator throws', () async {
+    test('generatePrompt preserves stale prompt on failure', () async {
+      final orchestrator = _TogglePromptAIOrchestrator();
       final controller = SmartPromptController(
         repository: _FakeJournalRepository(),
-        aiOrchestrator: _FailingAIOrchestrator(),
+        aiOrchestrator: orchestrator,
       );
 
       await controller.generatePrompt();
+      expect(controller.state.prompt, 'First prompt');
 
-      expect(controller.state.prompt, isNull);
-      expect(
-        controller.state.errorMessage,
-        'Unable to generate prompt right now.',
+      orchestrator.shouldFail = true;
+      await controller.generatePrompt();
+
+      expect(controller.state.status, SmartPromptStatus.error);
+      expect(controller.state.prompt, 'First prompt');
+      expect(controller.state.stalePrompt, 'First prompt');
+      expect(controller.state.displayPrompt, 'First prompt');
+      expect(controller.state.retryable, isTrue);
+    });
+
+    test('retryLastPrompt delegates to generatePrompt', () async {
+      final controller = SmartPromptController(
+        repository: _FakeJournalRepository(),
+        aiOrchestrator: _FakeAIOrchestrator(generatedPrompt: 'Retry prompt'),
       );
+
+      await controller.retryLastPrompt();
+
+      expect(controller.state.prompt, 'Retry prompt');
     });
   });
 }
@@ -159,7 +182,9 @@ class _FakeAIOrchestrator implements AIOrchestrator {
   }
 }
 
-class _FailingAIOrchestrator implements AIOrchestrator {
+class _TogglePromptAIOrchestrator implements AIOrchestrator {
+  bool shouldFail = false;
+
   @override
   Future<AIChatResponse> chatWithMemory(AIChatRequest request) async {
     throw Exception('not used');
@@ -167,7 +192,10 @@ class _FailingAIOrchestrator implements AIOrchestrator {
 
   @override
   Future<String> generatePrompt(AISmartPromptRequest request) async {
-    throw Exception('boom');
+    if (shouldFail) {
+      throw Exception('boom');
+    }
+    return 'First prompt';
   }
 
   @override
