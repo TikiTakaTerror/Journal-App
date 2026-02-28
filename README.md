@@ -56,6 +56,20 @@ flutter pub get
 flutter run
 ```
 
+For development with OpenAI config from `.secrets/openai.dev.json`:
+
+```bash
+./tool/run_dev.sh
+```
+
+Or manually:
+
+```bash
+flutter run --dart-define-from-file=.secrets/openai.dev.json --dart-define=OPENAI_DEBUG_LOGS=true
+```
+
+Important: a file in `.secrets/` is not loaded automatically. The app only sees those values when passed via `--dart-define`/`--dart-define-from-file` or when you store a key in `Settings`.
+
 ## Tests
 
 ```bash

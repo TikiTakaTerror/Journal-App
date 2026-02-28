@@ -20,8 +20,17 @@ class OpenAIErrorMapper {
   }
 
   OpenAIServiceException network({required int attempts}) {
+    return networkWithCause(attempts: attempts, cause: null);
+  }
+
+  OpenAIServiceException networkWithCause({
+    required int attempts,
+    required Object? cause,
+  }) {
+    final causeText = cause?.toString().toLowerCase() ?? '';
+    final message = _networkMessageForCause(causeText);
     return OpenAIServiceException(
-      'OpenAI request failed before receiving a response.',
+      message,
       code: OpenAIServiceErrorCode.network,
       retryable: true,
       attempts: attempts,
@@ -113,5 +122,23 @@ class OpenAIErrorMapper {
       }
     }
     return null;
+  }
+
+  String _networkMessageForCause(String causeText) {
+    if (causeText.contains('xmlhttprequest error') ||
+        causeText.contains('failed to fetch') ||
+        causeText.contains('cors')) {
+      return 'OpenAI request failed in the browser before receiving a response. '
+          'If you are running on web, direct cloud calls can be blocked by CORS. '
+          'Try iOS/Android/desktop or a backend proxy.';
+    }
+
+    if (causeText.contains('failed host lookup') ||
+        causeText.contains('name or service not known')) {
+      return 'OpenAI request failed before receiving a response (DNS lookup failed). '
+          'Check internet access and OPENAI_BASE_URL.';
+    }
+
+    return 'OpenAI request failed before receiving a response.';
   }
 }

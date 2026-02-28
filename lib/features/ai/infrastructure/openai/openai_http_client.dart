@@ -118,9 +118,12 @@ class OpenAIHttpClient {
           ),
         );
         throw error;
-      } on Exception catch (_) {
+      } on Exception catch (error) {
         stopwatch.stop();
-        final error = _errorMapper.network(attempts: attempt);
+        final mappedError = _errorMapper.networkWithCause(
+          attempts: attempt,
+          cause: error,
+        );
         if (_requestPolicy.canRetryAfterAttempt(attempt)) {
           final delay = _requestPolicy.retryDelayForAttempt(attempt: attempt);
           _logger.log(
@@ -132,8 +135,10 @@ class OpenAIHttpClient {
                 'attempt': attempt,
                 'next_attempt': attempt + 1,
                 'delay_ms': delay.inMilliseconds,
-                'reason': error.code.name,
+                'reason': mappedError.code.name,
                 'latency_ms': stopwatch.elapsedMilliseconds,
+                'error_type': error.runtimeType.toString(),
+                'error_message': error.toString(),
               },
             ),
           );
@@ -148,12 +153,14 @@ class OpenAIHttpClient {
               'operation': operation,
               'endpoint': uri.path,
               'attempt': attempt,
-              'reason': error.code.name,
+              'reason': mappedError.code.name,
               'latency_ms': stopwatch.elapsedMilliseconds,
+              'error_type': error.runtimeType.toString(),
+              'error_message': error.toString(),
             },
           ),
         );
-        throw error;
+        throw mappedError;
       }
 
       stopwatch.stop();

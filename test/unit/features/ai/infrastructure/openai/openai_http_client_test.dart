@@ -194,6 +194,43 @@ void main() {
       expect(allText, isNot(contains('sk-secret-value')));
       expect(allText, isNot(contains('journal body secret phrase')));
     });
+
+    test('maps browser-style network errors to actionable guidance', () async {
+      final mockClient = MockClient((_) async {
+        throw http.ClientException('XMLHttpRequest error.');
+      });
+
+      final policy = OpenAIRequestPolicy(maxRetries: 0, randomDouble: () => 0.5);
+      final client = OpenAIHttpClient(
+        httpClient: mockClient,
+        requestPolicy: policy,
+        errorMapper: OpenAIErrorMapper(requestPolicy: policy),
+      );
+
+      await expectLater(
+        client.postJson(
+          uri: Uri.parse('https://api.example.test/v1/responses'),
+          headers: const <String, String>{'Authorization': 'Bearer secret-key'},
+          payload: const <String, Object?>{'model': 'gpt-4.1-nano'},
+          operation: 'test_op',
+          model: 'gpt-4.1-nano',
+          messageCount: 1,
+        ),
+        throwsA(
+          isA<OpenAIServiceException>()
+              .having(
+                (error) => error.code,
+                'code',
+                OpenAIServiceErrorCode.network,
+              )
+              .having(
+                (error) => error.message,
+                'message',
+                contains('CORS'),
+              ),
+        ),
+      );
+    });
   });
 }
 
